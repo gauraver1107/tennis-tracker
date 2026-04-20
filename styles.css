@@ -350,6 +350,98 @@ th.right, td.right { text-align: right; }
 
 #player-inputs input { margin-bottom: 8px; }
 
+.location-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.location-row input { flex: 1; }
+.location-row button { white-space: nowrap; padding: 9px 14px; }
+
+.play-advice {
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.play-advice.great {
+  background: rgba(29, 158, 117, 0.12);
+  border: 1px solid rgba(29, 158, 117, 0.3);
+}
+.play-advice.ok {
+  background: rgba(239, 159, 39, 0.12);
+  border: 1px solid rgba(239, 159, 39, 0.3);
+}
+.play-advice.bad {
+  background: rgba(163, 45, 45, 0.1);
+  border: 1px solid rgba(163, 45, 45, 0.3);
+}
+.play-advice .verdict-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+.play-advice .verdict-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.play-advice .verdict-text {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.forecast-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.forecast-day {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  text-align: center;
+}
+.forecast-day.play-great { border-color: rgba(29, 158, 117, 0.5); }
+.forecast-day.play-ok { border-color: rgba(239, 159, 39, 0.5); }
+.forecast-day.play-bad { opacity: 0.6; }
+.forecast-day .day-name {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.forecast-day .day-icon {
+  font-size: 26px;
+  line-height: 1;
+  margin: 4px 0;
+}
+.forecast-day .day-temp {
+  font-size: 14px;
+  font-weight: 500;
+}
+.forecast-day .day-low {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.forecast-day .day-wind, .forecast-day .day-rain {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.weather-loading {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .modal {
   position: fixed;
   inset: 0;
