@@ -929,13 +929,8 @@ async function renderWeekendCoordinator() {
   const box = document.getElementById('weekend-coordinator');
   if (!box) return;
   const dates = getUpcomingWeekendDates();
-  if (dates.length === 0) {
-    box.innerHTML = '';
-    return;
-  }
-  if (!coordinatorDate || !dates.includes(coordinatorDate)) {
-    coordinatorDate = dates[0];
-  }
+  if (dates.length === 0) { box.innerHTML = ''; return; }
+  if (!coordinatorDate || !dates.includes(coordinatorDate)) coordinatorDate = dates[0];
 
   try {
     if (!weatherCache.data || (Date.now() - weatherCache.fetchedAt) > 30 * 60 * 1000) {
@@ -944,11 +939,9 @@ async function renderWeekendCoordinator() {
       const weather = await fetchWeather(geo.lat, geo.lon);
       weatherCache = { data: weather, fetchedAt: Date.now(), location: locationName, geo };
     }
-  } catch (e) {
-    console.warn('Weather unavailable on dashboard:', e);
-  }
+  } catch (e) { console.warn('Weather unavailable:', e); }
 
-  let weatherHtml = '';
+  let weatherColHtml = '';
   let verdict = null;
   if (weatherCache.data) {
     const daily = weatherCache.data.daily;
@@ -962,13 +955,35 @@ async function renderWeekendCoordinator() {
         wind_speed_10m_max: daily.wind_speed_10m_max[idx]
       };
       verdict = playabilityScore(day);
-      weatherHtml = `
-        <div class="wc-weather">
-          <span class="icon">${weatherIcon(day.weather_code)}</span>
-          <span>${Math.round(day.temperature_2m_max)}° · 💧${day.precipitation_probability_max}% · 💨${Math.round(day.wind_speed_10m_max)}mph</span>
-          <span class="wc-verdict ${verdict.rank}">${verdict.rank === 'great' ? '🎾 Good' : verdict.rank === 'ok' ? '⚠️ OK' : '🚫 Skip'}</span>
+      weatherColHtml = `
+        <div class="wc-right">
+          <div class="wc-weather-card">
+            <div class="wc-weather-top">
+              <div class="wc-weather-icon">${weatherIcon(day.weather_code)}</div>
+              <div class="wc-weather-main">
+                <div class="wc-weather-temp">${Math.round(day.temperature_2m_max)}° / ${Math.round(day.temperature_2m_min)}°F</div>
+                <div class="wc-weather-desc">${weatherLabel(day.weather_code)}</div>
+              </div>
+            </div>
+            <div class="wc-weather-stats">
+              <div class="wc-stat">
+                <div class="wc-stat-label">Rain chance</div>
+                <div class="wc-stat-value">💧 ${day.precipitation_probability_max}%</div>
+              </div>
+              <div class="wc-stat">
+                <div class="wc-stat-label">Wind speed</div>
+                <div class="wc-stat-value">💨 ${Math.round(day.wind_speed_10m_max)} mph</div>
+              </div>
+            </div>
+          </div>
+          <div class="wc-verdict ${verdict.rank}">
+            ${verdict.rank === 'great' ? '🎾 Great day to play' : verdict.rank === 'ok' ? '⚠️ Playable — ' + verdict.reason : '🚫 ' + verdict.reason}
+          </div>
         </div>`;
     }
+  }
+  if (!weatherColHtml) {
+    weatherColHtml = `<div class="wc-right"><div class="wc-no-weather">Open Weather tab once to load forecast</div></div>`;
   }
 
   const toggleHtml = dates.length > 1 ? `
@@ -980,49 +995,56 @@ async function renderWeekendCoordinator() {
     </div>` : '';
 
   const votesForDate = state.availability[coordinatorDate] || {};
-  const voteCounts = { in: 0, maybe: 0, out: 0, none: 0 };
-  state.players.forEach(p => {
-    const v = votesForDate[p] || 'none';
-    voteCounts[v]++;
-  });
+  const voteCounts = { in: 0, maybe: 0, out: 0 };
+  state.players.forEach(p => { const v = votesForDate[p]; if (v) voteCounts[v]++; });
 
   const playerVotesHtml = state.players.map(p => {
     const vote = votesForDate[p] || null;
+    const rowClass = vote ? `voted-${vote}` : '';
+    const statusLabel = vote === 'in' ? '<span class="wc-vote-status status-in">✅ In</span>'
+      : vote === 'maybe' ? '<span class="wc-vote-status status-maybe">❓ Maybe</span>'
+      : vote === 'out' ? '<span class="wc-vote-status status-out">❌ Out</span>'
+      : '<span class="wc-vote-status">Not voted</span>';
+    const btnIn    = `<button class="vote-btn ${vote === 'in' ? 'selected-in' : vote ? 'not-selected' : ''}" data-player="${escapeHtml(p)}" data-vote="in">✅</button>`;
+    const btnMaybe = `<button class="vote-btn ${vote === 'maybe' ? 'selected-maybe' : vote ? 'not-selected' : ''}" data-player="${escapeHtml(p)}" data-vote="maybe">❓</button>`;
+    const btnOut   = `<button class="vote-btn ${vote === 'out' ? 'selected-out' : vote ? 'not-selected' : ''}" data-player="${escapeHtml(p)}" data-vote="out">❌</button>`;
     return `
-      <div class="wc-player-vote">
-        <div class="wc-player-name">${escapeHtml(p)}</div>
-        <div class="wc-vote-buttons">
-          <button class="vote-btn ${vote === 'in' ? 'selected-in' : ''}" data-player="${escapeHtml(p)}" data-vote="in">✅ In</button>
-          <button class="vote-btn ${vote === 'maybe' ? 'selected-maybe' : ''}" data-player="${escapeHtml(p)}" data-vote="maybe">❓ Maybe</button>
-          <button class="vote-btn ${vote === 'out' ? 'selected-out' : ''}" data-player="${escapeHtml(p)}" data-vote="out">❌ Out</button>
+      <div class="wc-player-vote ${rowClass}">
+        <div class="wc-player-info">
+          <div class="wc-player-name">${escapeHtml(p)}</div>
+          ${statusLabel}
         </div>
+        <div class="wc-vote-buttons">${btnIn}${btnMaybe}${btnOut}</div>
       </div>`;
   }).join('');
 
-  const dateLabel = new Date(coordinatorDate + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const totalVoted = voteCounts.in + voteCounts.maybe + voteCounts.out;
+  const goBadgeClass = voteCounts.in >= 4 ? 'go' : voteCounts.in + voteCounts.maybe >= 4 ? 'close' : 'wait';
+  const goBadgeText = voteCounts.in >= 4 ? '🎾 Doubles confirmed!'
+    : voteCounts.in === 3 ? '👀 1 more needed'
+    : voteCounts.in + voteCounts.maybe >= 4 ? '⏳ Waiting on maybes'
+    : totalVoted === 0 ? 'No votes yet' : `${5 - totalVoted} yet to vote`;
 
   box.className = 'weekend-coordinator';
   box.innerHTML = `
     ${toggleHtml}
-    <div class="wc-header">
-      <div class="wc-title">${dateLabel}</div>
-      ${weatherHtml}
-    </div>
-    <div class="wc-votes">${playerVotesHtml}</div>
-    <div class="wc-summary">
-      <span>✅ <strong>${voteCounts.in}</strong> in</span>
-      <span>❓ <strong>${voteCounts.maybe}</strong> maybe</span>
-      <span>❌ <strong>${voteCounts.out}</strong> out</span>
-      <span style="margin-left:auto">${voteCounts.in >= 4 ? '🎾 Enough for doubles!' : voteCounts.in === 3 ? '👀 Need 1 more' : voteCounts.in + voteCounts.maybe >= 4 ? '⏳ Waiting on maybes' : 'Waiting for votes'}</span>
+    <div class="wc-body">
+      <div class="wc-left">
+        <div class="wc-votes">${playerVotesHtml}</div>
+        <div class="wc-summary">
+          <span>✅ <strong>${voteCounts.in}</strong></span>
+          <span>❓ <strong>${voteCounts.maybe}</strong></span>
+          <span>❌ <strong>${voteCounts.out}</strong></span>
+          <span class="wc-go-badge ${goBadgeClass}">${goBadgeText}</span>
+        </div>
+      </div>
+      ${weatherColHtml}
     </div>`;
 
   box.querySelectorAll('.wc-toggle-date button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      coordinatorDate = btn.dataset.date;
-      renderWeekendCoordinator();
-    });
+    btn.addEventListener('click', () => { coordinatorDate = btn.dataset.date; renderWeekendCoordinator(); });
   });
-  box.querySelectorAll('.vote-btn').forEach(btn => {
+  box.querySelectorAll('.vote-btn:not(.not-selected)').forEach(btn => {
     btn.addEventListener('click', () => recordVote(btn.dataset.player, btn.dataset.vote));
   });
 }
