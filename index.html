@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1D9E75">
+<title>Weekend Tennis Tracker</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎾</text></svg>">
+</head>
+<body>
+
+<header>
+  <h1>🎾 Weekend tennis</h1>
+  <div class="status" id="sync-status">Connecting…</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="dashboard" class="tab-active">Dashboard</button>
+  <button data-tab="log">Log match</button>
+  <button data-tab="rotation">Next match</button>
+  <button data-tab="history">History</button>
+  <button data-tab="chemistry">Partners</button>
+  <button data-tab="players">Players</button>
+</nav>
+
+<main>
+
+  <section id="panel-dashboard" class="panel">
+    <div class="controls-row">
+      <label>View</label>
+      <select id="filter-weekend"></select>
+      <button id="export-csv" class="btn-small">Export CSV</button>
+    </div>
+    <div class="summary-grid" id="summary-cards"></div>
+    <div id="champion-badge" class="champion-hidden"></div>
+    <h3>Leaderboard</h3>
+    <div class="table-wrap" id="leaderboard"></div>
+    <h3>Win rate trend</h3>
+    <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+    <h3>ELO rating history</h3>
+    <div class="chart-wrap"><canvas id="eloChart"></canvas></div>
+  </section>
+
+  <section id="panel-log" class="panel hidden">
+    <div class="card">
+      <div class="form-grid-2">
+        <div>
+          <label>Date</label>
+          <input type="date" id="match-date">
+        </div>
+        <div>
+          <label>Sets format</label>
+          <select id="sets-format">
+            <option value="1">Best of 1</option>
+            <option value="3" selected>Best of 3</option>
+            <option value="5">Best of 5</option>
+          </select>
+        </div>
+      </div>
+      <label>Team A</label>
+      <div class="form-grid-2">
+        <select id="a1"></select>
+        <select id="a2"></select>
+      </div>
+      <label>Team B</label>
+      <div class="form-grid-2">
+        <select id="b1"></select>
+        <select id="b2"></select>
+      </div>
+      <div id="sets-container"></div>
+      <label>Notes (optional)</label>
+      <textarea id="match-notes" rows="2" placeholder="Memorable rally, weather, injuries..."></textarea>
+      <div id="sitting-out" class="hint"></div>
+      <div id="form-error" class="error hidden"></div>
+      <button id="save-match" class="btn-primary">Save match</button>
+    </div>
+  </section>
+
+  <section id="panel-rotation" class="panel hidden">
+    <p class="hint">Suggested lineup balancing rest, partner variety, and ELO-based team strength.</p>
+    <div id="rotation-suggestion"></div>
+    <button id="reshuffle" class="btn-primary">Shuffle again</button>
+  </section>
+
+  <section id="panel-history" class="panel hidden">
+    <div id="history-list"></div>
+  </section>
+
+  <section id="panel-chemistry" class="panel hidden">
+    <p class="hint">Win rate for every pairing that has played together.</p>
+    <div id="chemistry-list"></div>
+  </section>
+
+  <section id="panel-players" class="panel hidden">
+    <div class="card">
+      <p class="hint">Edit player names. Changes sync to all devices.</p>
+      <div id="player-inputs"></div>
+      <button id="save-players" class="btn-primary">Save names</button>
+    </div>
+    <div class="card">
+      <p class="hint">Clears all match data for everyone.</p>
+      <button id="reset-all" class="btn-danger">Reset all match data</button>
+    </div>
+  </section>
+
+</main>
+
+<div id="share-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Match saved! 🎾</h3>
+    <p>Share to WhatsApp group?</p>
+    <textarea id="share-text" rows="6"></textarea>
+    <div class="modal-actions">
+      <button id="share-whatsapp" class="btn-primary">Open WhatsApp</button>
+      <button id="share-copy" class="btn-small">Copy text</button>
+      <button id="share-dismiss" class="btn-small">Skip</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script type="module" src="app.js"></script>
+
+</body>
+</html>
