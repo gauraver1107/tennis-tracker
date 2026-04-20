@@ -20,6 +20,7 @@
   <button data-tab="log">Log match</button>
   <button data-tab="rotation">Next match</button>
   <button data-tab="weather">Weather</button>
+  <button data-tab="photos">Photos</button>
   <button data-tab="history">History</button>
   <button data-tab="chemistry">Partners</button>
   <button data-tab="players">Players</button>
@@ -33,6 +34,7 @@
       <select id="filter-weekend"></select>
       <button id="export-csv" class="btn-small">Export CSV</button>
     </div>
+    <div id="weekend-coordinator"></div>
     <div class="summary-grid" id="summary-cards"></div>
     <div id="champion-badge" class="champion-hidden"></div>
     <h3>Leaderboard</h3>
@@ -98,6 +100,22 @@
     <div id="weather-forecast"></div>
     <h3>Hourly for tomorrow</h3>
     <div class="chart-wrap"><canvas id="weatherChart"></canvas></div>
+  </section>
+
+  <section id="panel-photos" class="panel hidden">
+    <div class="card">
+      <label>Upload this weekend's photo</label>
+      <p class="hint" style="margin-top:0">One photo per weekend — the team moment, trophy shot, or just everyone's smiles. Auto-compressed to keep it fast.</p>
+      <div class="photo-upload-row">
+        <select id="photo-uploader"></select>
+        <input type="file" id="photo-file" accept="image/*" capture="environment">
+      </div>
+      <div id="photo-preview" class="photo-preview hidden"></div>
+      <div id="photo-error" class="error hidden"></div>
+      <button id="photo-upload-btn" class="btn-primary">Upload photo</button>
+    </div>
+    <h3>Photo timeline</h3>
+    <div id="photo-timeline"></div>
   </section>
 
   <section id="panel-history" class="panel hidden">
