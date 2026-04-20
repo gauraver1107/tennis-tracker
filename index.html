@@ -19,6 +19,7 @@
   <button data-tab="dashboard" class="tab-active">Dashboard</button>
   <button data-tab="log">Log match</button>
   <button data-tab="rotation">Next match</button>
+  <button data-tab="weather">Weather</button>
   <button data-tab="history">History</button>
   <button data-tab="chemistry">Partners</button>
   <button data-tab="players">Players</button>
@@ -81,6 +82,22 @@
     <p class="hint">Suggested lineup balancing rest, partner variety, and ELO-based team strength.</p>
     <div id="rotation-suggestion"></div>
     <button id="reshuffle" class="btn-primary">Shuffle again</button>
+  </section>
+
+  <section id="panel-weather" class="panel hidden">
+    <div class="card">
+      <label>Where do you play?</label>
+      <div class="location-row">
+        <input type="text" id="location-name" placeholder="e.g., Edison, NJ" value="Edison, NJ">
+        <button id="save-location" class="btn-small">Update</button>
+      </div>
+      <p class="hint" style="margin-top:10px">Forecast powered by Open-Meteo. No account needed.</p>
+    </div>
+    <div id="weather-play-advice"></div>
+    <h3>7-day forecast</h3>
+    <div id="weather-forecast"></div>
+    <h3>Hourly for tomorrow</h3>
+    <div class="chart-wrap"><canvas id="weatherChart"></canvas></div>
   </section>
 
   <section id="panel-history" class="panel hidden">
