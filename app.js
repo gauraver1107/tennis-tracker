@@ -2,18 +2,22 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebas
 import {
   getFirestore, doc, setDoc, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+import {
+  getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
+} from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
 
 import { firebaseConfig } from './firebase-config.js';
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const DOC_REF = doc(db, 'tennis', 'shared');
 
 const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag'];
 const ELO_START = 1200;
 const ELO_K = 32;
 
-let state = { players: [...DEFAULT_PLAYERS], matches: [] };
+let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [] };
 let trendChart = null, eloChart = null, weatherChart = null;
 let currentFilter = 'all';
 let isSyncing = false;
@@ -31,10 +35,12 @@ onSnapshot(DOC_REF, (snap) => {
     state = {
       players: data.players || [...DEFAULT_PLAYERS],
       matches: data.matches || [],
-      location: data.location || null
+      location: data.location || null,
+      availability: data.availability || {},
+      photos: data.photos || []
     };
   } else {
-    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null };
+    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [] };
   }
   if (state.players.length !== 5) state.players = [...DEFAULT_PLAYERS];
   state.matches.forEach(m => {
@@ -74,6 +80,7 @@ function setupTabs() {
       if (btn.dataset.tab === 'dashboard') renderCharts();
       if (btn.dataset.tab === 'rotation') renderRotation();
       if (btn.dataset.tab === 'weather') loadWeather();
+      if (btn.dataset.tab === 'photos') renderPhotos();
     });
   });
 }
@@ -900,8 +907,326 @@ function escapeHtml(s) {
   );
 }
 
+let coordinatorDate = null;
+
+function getUpcomingWeekendDates() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dates = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) {
+      dates.push(d.toISOString().slice(0, 10));
+      if (dates.length === 2) break;
+    }
+  }
+  return dates;
+}
+
+async function renderWeekendCoordinator() {
+  const box = document.getElementById('weekend-coordinator');
+  if (!box) return;
+  const dates = getUpcomingWeekendDates();
+  if (dates.length === 0) {
+    box.innerHTML = '';
+    return;
+  }
+  if (!coordinatorDate || !dates.includes(coordinatorDate)) {
+    coordinatorDate = dates[0];
+  }
+
+  try {
+    if (!weatherCache.data || (Date.now() - weatherCache.fetchedAt) > 30 * 60 * 1000) {
+      const locationName = (state.location?.name || 'Edison, NJ').trim();
+      const geo = state.location?.lat ? state.location : await geocodeLocation(locationName);
+      const weather = await fetchWeather(geo.lat, geo.lon);
+      weatherCache = { data: weather, fetchedAt: Date.now(), location: locationName, geo };
+    }
+  } catch (e) {
+    console.warn('Weather unavailable on dashboard:', e);
+  }
+
+  let weatherHtml = '';
+  let verdict = null;
+  if (weatherCache.data) {
+    const daily = weatherCache.data.daily;
+    const idx = daily.time.indexOf(coordinatorDate);
+    if (idx !== -1) {
+      const day = {
+        weather_code: daily.weather_code[idx],
+        temperature_2m_max: daily.temperature_2m_max[idx],
+        temperature_2m_min: daily.temperature_2m_min[idx],
+        precipitation_probability_max: daily.precipitation_probability_max[idx],
+        wind_speed_10m_max: daily.wind_speed_10m_max[idx]
+      };
+      verdict = playabilityScore(day);
+      weatherHtml = `
+        <div class="wc-weather">
+          <span class="icon">${weatherIcon(day.weather_code)}</span>
+          <span>${Math.round(day.temperature_2m_max)}° · 💧${day.precipitation_probability_max}% · 💨${Math.round(day.wind_speed_10m_max)}mph</span>
+          <span class="wc-verdict ${verdict.rank}">${verdict.rank === 'great' ? '🎾 Good' : verdict.rank === 'ok' ? '⚠️ OK' : '🚫 Skip'}</span>
+        </div>`;
+    }
+  }
+
+  const toggleHtml = dates.length > 1 ? `
+    <div class="wc-toggle-date">
+      ${dates.map(d => `
+        <button data-date="${d}" class="${d === coordinatorDate ? 'active' : ''}">
+          ${new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+        </button>`).join('')}
+    </div>` : '';
+
+  const votesForDate = state.availability[coordinatorDate] || {};
+  const voteCounts = { in: 0, maybe: 0, out: 0, none: 0 };
+  state.players.forEach(p => {
+    const v = votesForDate[p] || 'none';
+    voteCounts[v]++;
+  });
+
+  const playerVotesHtml = state.players.map(p => {
+    const vote = votesForDate[p] || null;
+    return `
+      <div class="wc-player-vote">
+        <div class="wc-player-name">${escapeHtml(p)}</div>
+        <div class="wc-vote-buttons">
+          <button class="vote-btn ${vote === 'in' ? 'selected-in' : ''}" data-player="${escapeHtml(p)}" data-vote="in">✅ In</button>
+          <button class="vote-btn ${vote === 'maybe' ? 'selected-maybe' : ''}" data-player="${escapeHtml(p)}" data-vote="maybe">❓ Maybe</button>
+          <button class="vote-btn ${vote === 'out' ? 'selected-out' : ''}" data-player="${escapeHtml(p)}" data-vote="out">❌ Out</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  const dateLabel = new Date(coordinatorDate + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  box.className = 'weekend-coordinator';
+  box.innerHTML = `
+    ${toggleHtml}
+    <div class="wc-header">
+      <div class="wc-title">${dateLabel}</div>
+      ${weatherHtml}
+    </div>
+    <div class="wc-votes">${playerVotesHtml}</div>
+    <div class="wc-summary">
+      <span>✅ <strong>${voteCounts.in}</strong> in</span>
+      <span>❓ <strong>${voteCounts.maybe}</strong> maybe</span>
+      <span>❌ <strong>${voteCounts.out}</strong> out</span>
+      <span style="margin-left:auto">${voteCounts.in >= 4 ? '🎾 Enough for doubles!' : voteCounts.in === 3 ? '👀 Need 1 more' : voteCounts.in + voteCounts.maybe >= 4 ? '⏳ Waiting on maybes' : 'Waiting for votes'}</span>
+    </div>`;
+
+  box.querySelectorAll('.wc-toggle-date button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      coordinatorDate = btn.dataset.date;
+      renderWeekendCoordinator();
+    });
+  });
+  box.querySelectorAll('.vote-btn').forEach(btn => {
+    btn.addEventListener('click', () => recordVote(btn.dataset.player, btn.dataset.vote));
+  });
+}
+
+function recordVote(player, vote) {
+  if (!state.availability) state.availability = {};
+  if (!state.availability[coordinatorDate]) state.availability[coordinatorDate] = {};
+  const current = state.availability[coordinatorDate][player];
+  if (current === vote) {
+    delete state.availability[coordinatorDate][player];
+  } else {
+    state.availability[coordinatorDate][player] = vote;
+  }
+  saveState();
+}
+
+async function compressImage(file, maxDimension = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Could not load image'));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round(height * (maxDimension / width));
+            width = maxDimension;
+          } else {
+            width = Math.round(width * (maxDimension / height));
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(blob => {
+          if (!blob) return reject(new Error('Compression failed'));
+          resolve(blob);
+        }, 'image/jpeg', quality);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+let pendingPhotoFile = null;
+
+function setupPhotoTab() {
+  const fileInput = document.getElementById('photo-file');
+  const preview = document.getElementById('photo-preview');
+  const errorEl = document.getElementById('photo-error');
+
+  fileInput.addEventListener('change', async (e) => {
+    errorEl.classList.add('hidden');
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      errorEl.textContent = 'Please pick an image file.';
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    try {
+      const compressed = await compressImage(file);
+      pendingPhotoFile = compressed;
+      const url = URL.createObjectURL(compressed);
+      const origKB = Math.round(file.size / 1024);
+      const newKB = Math.round(compressed.size / 1024);
+      preview.innerHTML = `
+        <img src="${url}">
+        <div class="preview-info">Compressed ${origKB}KB → ${newKB}KB</div>`;
+      preview.classList.remove('hidden');
+    } catch (err) {
+      errorEl.textContent = 'Could not process image: ' + err.message;
+      errorEl.classList.remove('hidden');
+    }
+  });
+
+  document.getElementById('photo-upload-btn').addEventListener('click', uploadPhoto);
+}
+
+async function uploadPhoto() {
+  const errorEl = document.getElementById('photo-error');
+  errorEl.classList.add('hidden');
+  if (!pendingPhotoFile) {
+    errorEl.textContent = 'Pick a photo first.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  const uploader = document.getElementById('photo-uploader').value;
+  if (!uploader) {
+    errorEl.textContent = 'Who uploaded this?';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  const btn = document.getElementById('photo-upload-btn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Uploading...';
+  btn.disabled = true;
+  setStatus('Uploading photo…', '');
+
+  try {
+    const photoId = 'photo_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    const path = `photos/${photoId}.jpg`;
+    const sref = storageRef(storage, path);
+    await uploadBytes(sref, pendingPhotoFile, { contentType: 'image/jpeg' });
+    const url = await getDownloadURL(sref);
+
+    if (!state.photos) state.photos = [];
+    state.photos.push({
+      id: photoId,
+      path: path,
+      url: url,
+      uploader: uploader,
+      date: new Date().toISOString().slice(0, 10),
+      createdAt: Date.now()
+    });
+    await saveState();
+
+    pendingPhotoFile = null;
+    document.getElementById('photo-file').value = '';
+    document.getElementById('photo-preview').classList.add('hidden');
+    document.getElementById('photo-preview').innerHTML = '';
+    setStatus('Synced', 'online');
+    renderPhotos();
+  } catch (err) {
+    console.error('Upload failed:', err);
+    errorEl.textContent = 'Upload failed: ' + (err.message || 'check Storage rules');
+    errorEl.classList.remove('hidden');
+    setStatus('Upload failed', 'offline');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+function renderPhotosPanel() {
+  const sel = document.getElementById('photo-uploader');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— Who uploaded? —</option>' +
+    state.players.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+  if (prev) sel.value = prev;
+  renderPhotos();
+}
+
+function renderPhotos() {
+  const list = document.getElementById('photo-timeline');
+  if (!list) return;
+  const photos = [...(state.photos || [])].sort((a, b) => b.createdAt - a.createdAt);
+  if (photos.length === 0) {
+    list.innerHTML = `<div class="hint" style="text-align:center; padding:2rem;">No photos yet. First one sets the tradition!</div>`;
+    return;
+  }
+  list.innerHTML = photos.map(p => `
+    <div class="photo-item">
+      <img src="${p.url}" data-fullsize="${p.url}" loading="lazy">
+      <div class="photo-meta">
+        <div class="photo-info">
+          <div>📸 ${escapeHtml(p.uploader)}</div>
+          <div class="photo-date">${formatDate(p.date)}</div>
+        </div>
+        <button class="btn-small" data-delete-photo="${p.id}">Delete</button>
+      </div>
+    </div>`).join('');
+  list.querySelectorAll('img[data-fullsize]').forEach(img => {
+    img.addEventListener('click', () => openLightbox(img.dataset.fullsize));
+  });
+  list.querySelectorAll('[data-delete-photo]').forEach(btn => {
+    btn.addEventListener('click', () => deletePhoto(btn.dataset.deletePhoto));
+  });
+}
+
+function openLightbox(url) {
+  const box = document.createElement('div');
+  box.className = 'photo-lightbox';
+  box.innerHTML = `<img src="${url}">`;
+  box.addEventListener('click', () => box.remove());
+  document.body.appendChild(box);
+}
+
+async function deletePhoto(id) {
+  if (!confirm('Delete this photo?')) return;
+  const photo = state.photos.find(p => p.id === id);
+  if (!photo) return;
+  try {
+    if (photo.path) {
+      await deleteObject(storageRef(storage, photo.path));
+    }
+  } catch (e) {
+    console.warn('Storage delete failed (maybe already gone):', e);
+  }
+  state.photos = state.photos.filter(p => p.id !== id);
+  await saveState();
+}
+
 function renderAll() {
   renderFilter();
+  renderWeekendCoordinator();
   renderSummary();
   renderChampion();
   renderLeaderboard();
@@ -910,10 +1235,12 @@ function renderAll() {
   renderPlayersPanel();
   renderLogForm();
   renderCharts();
+  renderPhotosPanel();
 }
 
 setupTabs();
 setupShareModal();
+setupPhotoTab();
 document.getElementById('save-match').addEventListener('click', saveMatch);
 document.getElementById('save-players').addEventListener('click', savePlayers);
 document.getElementById('reset-all').addEventListener('click', resetAll);
