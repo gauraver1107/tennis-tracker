@@ -14,9 +14,10 @@ const ELO_START = 1200;
 const ELO_K = 32;
 
 let state = { players: [...DEFAULT_PLAYERS], matches: [] };
-let trendChart = null, eloChart = null;
+let trendChart = null, eloChart = null, weatherChart = null;
 let currentFilter = 'all';
 let isSyncing = false;
+let weatherCache = { data: null, fetchedAt: 0, location: null };
 
 function setStatus(text, cls) {
   const el = document.getElementById('sync-status');
@@ -29,10 +30,11 @@ onSnapshot(DOC_REF, (snap) => {
     const data = snap.data();
     state = {
       players: data.players || [...DEFAULT_PLAYERS],
-      matches: data.matches || []
+      matches: data.matches || [],
+      location: data.location || null
     };
   } else {
-    state = { players: [...DEFAULT_PLAYERS], matches: [] };
+    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null };
   }
   if (state.players.length !== 5) state.players = [...DEFAULT_PLAYERS];
   state.matches.forEach(m => {
@@ -71,6 +73,7 @@ function setupTabs() {
       document.getElementById('panel-' + btn.dataset.tab).classList.remove('hidden');
       if (btn.dataset.tab === 'dashboard') renderCharts();
       if (btn.dataset.tab === 'rotation') renderRotation();
+      if (btn.dataset.tab === 'weather') loadWeather();
     });
   });
 }
@@ -663,6 +666,234 @@ function formatDate(d) {
   return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+async function geocodeLocation(name) {
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.results || data.results.length === 0) throw new Error('Location not found');
+  const r = data.results[0];
+  return { lat: r.latitude, lon: r.longitude, label: `${r.name}${r.admin1 ? ', ' + r.admin1 : ''}` };
+}
+
+async function fetchWeather(lat, lon) {
+  const params = new URLSearchParams({
+    latitude: lat,
+    longitude: lon,
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset',
+    hourly: 'temperature_2m,precipitation_probability,wind_speed_10m,weather_code',
+    temperature_unit: 'fahrenheit',
+    wind_speed_unit: 'mph',
+    precipitation_unit: 'inch',
+    timezone: 'auto',
+    forecast_days: 7
+  });
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+  if (!res.ok) throw new Error('Weather fetch failed');
+  return res.json();
+}
+
+function weatherIcon(code) {
+  if (code === 0) return '☀️';
+  if (code <= 2) return '🌤️';
+  if (code === 3) return '☁️';
+  if (code >= 45 && code <= 48) return '🌫️';
+  if (code >= 51 && code <= 67) return '🌧️';
+  if (code >= 71 && code <= 77) return '❄️';
+  if (code >= 80 && code <= 82) return '🌦️';
+  if (code >= 95) return '⛈️';
+  return '🌤️';
+}
+
+function weatherLabel(code) {
+  if (code === 0) return 'Clear';
+  if (code <= 2) return 'Partly cloudy';
+  if (code === 3) return 'Overcast';
+  if (code >= 45 && code <= 48) return 'Fog';
+  if (code >= 51 && code <= 57) return 'Drizzle';
+  if (code >= 61 && code <= 67) return 'Rain';
+  if (code >= 71 && code <= 77) return 'Snow';
+  if (code >= 80 && code <= 82) return 'Showers';
+  if (code >= 95) return 'Thunderstorm';
+  return 'Mixed';
+}
+
+function playabilityScore(day) {
+  const rain = day.precipitation_probability_max ?? 0;
+  const wind = day.wind_speed_10m_max ?? 0;
+  const tempMax = day.temperature_2m_max ?? 70;
+  const tempMin = day.temperature_2m_min ?? 60;
+  const code = day.weather_code ?? 0;
+
+  if (rain >= 60 || code >= 95 || code >= 71 && code <= 77) return { rank: 'bad', reason: rain >= 60 ? 'High chance of rain' : code >= 95 ? 'Thunderstorms expected' : 'Snow expected' };
+  if (wind >= 20) return { rank: 'bad', reason: `Very windy (${Math.round(wind)} mph gusts)` };
+  if (tempMax >= 95) return { rank: 'bad', reason: `Too hot (${Math.round(tempMax)}°F)` };
+  if (tempMax <= 40) return { rank: 'bad', reason: `Too cold (${Math.round(tempMax)}°F high)` };
+
+  if (rain >= 30) return { rank: 'ok', reason: `${rain}% rain chance — check radar before heading out` };
+  if (wind >= 15) return { rank: 'ok', reason: `Breezy (${Math.round(wind)} mph) — lighter balls may drift` };
+  if (tempMax >= 88) return { rank: 'ok', reason: `Warm (${Math.round(tempMax)}°F) — bring extra water` };
+  if (tempMin <= 50 && tempMax <= 60) return { rank: 'ok', reason: `Cool (${Math.round(tempMin)}–${Math.round(tempMax)}°F) — layer up` };
+
+  return { rank: 'great', reason: `${weatherLabel(code)}, ${Math.round(tempMax)}°F, light wind — perfect for tennis` };
+}
+
+async function loadWeather() {
+  const forecastEl = document.getElementById('weather-forecast');
+  const adviceEl = document.getElementById('weather-play-advice');
+  const inputEl = document.getElementById('location-name');
+
+  if (state.location?.name && !inputEl.dataset.userEdited) {
+    inputEl.value = state.location.name;
+  }
+  const locationName = (inputEl.value || 'Edison, NJ').trim();
+
+  const cacheValid = weatherCache.data && weatherCache.location === locationName && (Date.now() - weatherCache.fetchedAt) < 30 * 60 * 1000;
+  if (!cacheValid) {
+    forecastEl.innerHTML = '<div class="weather-loading">Loading forecast…</div>';
+    adviceEl.innerHTML = '';
+    try {
+      const geo = state.location?.lat ? state.location : await geocodeLocation(locationName);
+      const weather = await fetchWeather(geo.lat, geo.lon);
+      weatherCache = { data: weather, fetchedAt: Date.now(), location: locationName, geo };
+    } catch (e) {
+      forecastEl.innerHTML = `<div class="error">Couldn't load weather for "${escapeHtml(locationName)}". Try a different location name.</div>`;
+      return;
+    }
+  }
+
+  renderWeather();
+}
+
+function renderWeather() {
+  const data = weatherCache.data;
+  if (!data) return;
+  const daily = data.daily;
+  const forecastEl = document.getElementById('weather-forecast');
+  const adviceEl = document.getElementById('weather-play-advice');
+
+  const nextWeekend = findNextWeekendIdx(daily.time);
+  if (nextWeekend !== -1) {
+    const day = {
+      weather_code: daily.weather_code[nextWeekend],
+      temperature_2m_max: daily.temperature_2m_max[nextWeekend],
+      temperature_2m_min: daily.temperature_2m_min[nextWeekend],
+      precipitation_probability_max: daily.precipitation_probability_max[nextWeekend],
+      wind_speed_10m_max: daily.wind_speed_10m_max[nextWeekend]
+    };
+    const verdict = playabilityScore(day);
+    const dayName = new Date(daily.time[nextWeekend] + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' });
+    adviceEl.innerHTML = `
+      <div class="play-advice ${verdict.rank}">
+        <div class="verdict-icon">${verdict.rank === 'great' ? '🎾' : verdict.rank === 'ok' ? '⚠️' : '🚫'}</div>
+        <div>
+          <div class="verdict-label">${dayName}'s outlook</div>
+          <div class="verdict-text">${verdict.reason}</div>
+        </div>
+      </div>`;
+  } else {
+    adviceEl.innerHTML = '';
+  }
+
+  let html = '<div class="forecast-grid">';
+  for (let i = 0; i < daily.time.length; i++) {
+    const day = {
+      weather_code: daily.weather_code[i],
+      temperature_2m_max: daily.temperature_2m_max[i],
+      temperature_2m_min: daily.temperature_2m_min[i],
+      precipitation_probability_max: daily.precipitation_probability_max[i],
+      wind_speed_10m_max: daily.wind_speed_10m_max[i]
+    };
+    const verdict = playabilityScore(day);
+    const d = new Date(daily.time[i] + 'T00:00:00');
+    const dayName = i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' });
+    html += `
+      <div class="forecast-day play-${verdict.rank}">
+        <div class="day-name">${dayName}</div>
+        <div class="day-icon">${weatherIcon(day.weather_code)}</div>
+        <div class="day-temp">${Math.round(day.temperature_2m_max)}°</div>
+        <div class="day-low">${Math.round(day.temperature_2m_min)}°</div>
+        <div class="day-rain">💧 ${day.precipitation_probability_max}%</div>
+        <div class="day-wind">💨 ${Math.round(day.wind_speed_10m_max)}mph</div>
+      </div>`;
+  }
+  html += '</div>';
+  forecastEl.innerHTML = html;
+
+  renderHourlyChart(data);
+}
+
+function findNextWeekendIdx(dates) {
+  for (let i = 0; i < dates.length; i++) {
+    const d = new Date(dates[i] + 'T00:00:00');
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) return i;
+  }
+  return -1;
+}
+
+function renderHourlyChart(data) {
+  const canvas = document.getElementById('weatherChart');
+  if (!canvas) return;
+  const now = new Date();
+  const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 6);
+  const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 22);
+
+  const times = data.hourly.time;
+  const labels = [], temps = [], rain = [], wind = [];
+  for (let i = 0; i < times.length; i++) {
+    const t = new Date(times[i]);
+    if (t >= tomorrowStart && t <= tomorrowEnd) {
+      labels.push(t.toLocaleTimeString(undefined, { hour: 'numeric' }));
+      temps.push(Math.round(data.hourly.temperature_2m[i]));
+      rain.push(data.hourly.precipitation_probability[i]);
+      wind.push(Math.round(data.hourly.wind_speed_10m[i]));
+    }
+  }
+
+  if (weatherChart) weatherChart.destroy();
+  if (labels.length === 0) {
+    blankChart(canvas, 'Hourly data unavailable');
+    return;
+  }
+
+  weatherChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Temp (°F)', data: temps, borderColor: '#D85A30', backgroundColor: '#D85A30', yAxisID: 'y', tension: 0.3, pointRadius: 2 },
+        { label: 'Rain %', data: rain, borderColor: '#378ADD', backgroundColor: '#378ADD', yAxisID: 'y1', tension: 0.3, pointRadius: 2, borderDash: [4,2] },
+        { label: 'Wind (mph)', data: wind, borderColor: '#7F77DD', backgroundColor: '#7F77DD', yAxisID: 'y1', tension: 0.3, pointRadius: 2, borderDash: [2,3] }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: { position: 'left', title: { display: true, text: '°F' } },
+        y1: { position: 'right', title: { display: true, text: '% / mph' }, grid: { drawOnChartArea: false }, min: 0 }
+      },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 12 } } } }
+    }
+  });
+}
+
+async function saveLocation() {
+  const name = document.getElementById('location-name').value.trim();
+  if (!name) return;
+  try {
+    const geo = await geocodeLocation(name);
+    state.location = { name: geo.label, lat: geo.lat, lon: geo.lon };
+    weatherCache = { data: null, fetchedAt: 0, location: null };
+    await saveState();
+    loadWeather();
+  } catch (e) {
+    alert('Could not find "' + name + '". Try "City, State" or "City, Country".');
+  }
+}
+
+
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
@@ -688,6 +919,7 @@ document.getElementById('save-players').addEventListener('click', savePlayers);
 document.getElementById('reset-all').addEventListener('click', resetAll);
 document.getElementById('export-csv').addEventListener('click', exportCsv);
 document.getElementById('reshuffle').addEventListener('click', renderRotation);
+document.getElementById('save-location').addEventListener('click', saveLocation);
 document.getElementById('filter-weekend').addEventListener('change', (e) => {
   currentFilter = e.target.value;
   renderSummary();
