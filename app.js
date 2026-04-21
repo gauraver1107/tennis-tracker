@@ -688,15 +688,70 @@ async function fetchWeather(lat, lon) {
     longitude: lon,
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset',
     hourly: 'temperature_2m,precipitation_probability,wind_speed_10m,weather_code',
-    temperature_unit: 'fahrenheit',
-    wind_speed_unit: 'mph',
-    precipitation_unit: 'inch',
+    temperature_unit: 'celsius',
+    wind_speed_unit: 'kmh',
+    precipitation_unit: 'mm',
     timezone: 'auto',
     forecast_days: 7
   });
   const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
   if (!res.ok) throw new Error('Weather fetch failed');
   return res.json();
+}
+
+const MORNING_START = 6;
+const MORNING_END = 12;
+
+function getMorningHours(data, dateStr) {
+  const times = data.hourly.time;
+  const hours = [];
+  for (let i = 0; i < times.length; i++) {
+    const t = new Date(times[i]);
+    const tDate = times[i].slice(0, 10);
+    const hour = t.getHours();
+    if (tDate === dateStr && hour >= MORNING_START && hour <= MORNING_END) {
+      hours.push({
+        hour,
+        label: hour === 12 ? '12 PM' : `${hour} AM`,
+        temp: Math.round(data.hourly.temperature_2m[i]),
+        rain: data.hourly.precipitation_probability[i],
+        wind: Math.round(data.hourly.wind_speed_10m[i]),
+        code: data.hourly.weather_code[i]
+      });
+    }
+  }
+  return hours;
+}
+
+function morningPlayability(hours) {
+  if (!hours || hours.length === 0) return null;
+  const peakRain = Math.max(...hours.map(h => h.rain));
+  const peakWind = Math.max(...hours.map(h => h.wind));
+  const tempMin = Math.min(...hours.map(h => h.temp));
+  const tempMax = Math.max(...hours.map(h => h.temp));
+  const hasBadCode = hours.some(h => h.code >= 95 || (h.code >= 71 && h.code <= 77));
+  const dominantCode = hours[Math.floor(hours.length / 2)]?.code ?? 0;
+
+  if (peakRain >= 60 || hasBadCode) return { rank: 'bad', reason: hasBadCode ? 'Thunderstorms or snow expected' : 'High rain chance morning' };
+  if (peakWind >= 30) return { rank: 'bad', reason: `Very windy (${peakWind} km/h)` };
+  if (tempMax >= 35) return { rank: 'bad', reason: `Too hot (${tempMax}°C)` };
+  if (tempMax <= 5) return { rank: 'bad', reason: `Too cold (${tempMax}°C)` };
+  if (peakRain >= 30) return { rank: 'ok', reason: `${peakRain}% rain chance — check radar first` };
+  if (peakWind >= 20) return { rank: 'ok', reason: `Breezy (${peakWind} km/h) — balls may drift` };
+  if (tempMax >= 32) return { rank: 'ok', reason: `Warm (${tempMax}°C) — bring extra water` };
+  if (tempMax <= 12) return { rank: 'ok', reason: `Cool (${tempMin}–${tempMax}°C) — layer up` };
+  return { rank: 'great', reason: `${weatherLabel(dominantCode)}, ${tempMin}–${tempMax}°C, light wind` };
+}
+
+function findBestWindow(hours) {
+  if (!hours || hours.length < 2) return null;
+  let bestScore = Infinity, bestIdx = 0;
+  for (let i = 0; i < hours.length - 1; i++) {
+    const score = hours[i].rain + hours[i + 1].rain + hours[i].wind + hours[i + 1].wind;
+    if (score < bestScore) { bestScore = score; bestIdx = i; }
+  }
+  const a = hours[bestIdx], b = hours[bestIdx + 1];
+  return { startLabel: a.label, endLabel: b.label, temp: Math.round((a.temp + b.temp) / 2), rain: Math.max(a.rain, b.rain), wind: Math.max(a.wind, b.wind), code: a.code };
 }
 
 function weatherIcon(code) {
@@ -727,21 +782,19 @@ function weatherLabel(code) {
 function playabilityScore(day) {
   const rain = day.precipitation_probability_max ?? 0;
   const wind = day.wind_speed_10m_max ?? 0;
-  const tempMax = day.temperature_2m_max ?? 70;
-  const tempMin = day.temperature_2m_min ?? 60;
+  const tempMax = day.temperature_2m_max ?? 20;
+  const tempMin = day.temperature_2m_min ?? 15;
   const code = day.weather_code ?? 0;
 
-  if (rain >= 60 || code >= 95 || code >= 71 && code <= 77) return { rank: 'bad', reason: rain >= 60 ? 'High chance of rain' : code >= 95 ? 'Thunderstorms expected' : 'Snow expected' };
-  if (wind >= 20) return { rank: 'bad', reason: `Very windy (${Math.round(wind)} mph gusts)` };
-  if (tempMax >= 95) return { rank: 'bad', reason: `Too hot (${Math.round(tempMax)}°F)` };
-  if (tempMax <= 40) return { rank: 'bad', reason: `Too cold (${Math.round(tempMax)}°F high)` };
-
-  if (rain >= 30) return { rank: 'ok', reason: `${rain}% rain chance — check radar before heading out` };
-  if (wind >= 15) return { rank: 'ok', reason: `Breezy (${Math.round(wind)} mph) — lighter balls may drift` };
-  if (tempMax >= 88) return { rank: 'ok', reason: `Warm (${Math.round(tempMax)}°F) — bring extra water` };
-  if (tempMin <= 50 && tempMax <= 60) return { rank: 'ok', reason: `Cool (${Math.round(tempMin)}–${Math.round(tempMax)}°F) — layer up` };
-
-  return { rank: 'great', reason: `${weatherLabel(code)}, ${Math.round(tempMax)}°F, light wind — perfect for tennis` };
+  if (rain >= 60 || code >= 95 || (code >= 71 && code <= 77)) return { rank: 'bad', reason: rain >= 60 ? 'High chance of rain' : code >= 95 ? 'Thunderstorms expected' : 'Snow expected' };
+  if (wind >= 30) return { rank: 'bad', reason: `Very windy (${Math.round(wind)} km/h)` };
+  if (tempMax >= 35) return { rank: 'bad', reason: `Too hot (${Math.round(tempMax)}°C)` };
+  if (tempMax <= 5) return { rank: 'bad', reason: `Too cold (${Math.round(tempMax)}°C)` };
+  if (rain >= 30) return { rank: 'ok', reason: `${rain}% rain chance — check radar` };
+  if (wind >= 20) return { rank: 'ok', reason: `Breezy (${Math.round(wind)} km/h) — balls may drift` };
+  if (tempMax >= 32) return { rank: 'ok', reason: `Warm (${Math.round(tempMax)}°C) — bring extra water` };
+  if (tempMax <= 12) return { rank: 'ok', reason: `Cool (${Math.round(tempMin)}–${Math.round(tempMax)}°C) — layer up` };
+  return { rank: 'great', reason: `${weatherLabel(code)}, ${Math.round(tempMax)}°C, light wind — perfect for tennis` };
 }
 
 async function loadWeather() {
@@ -780,20 +833,21 @@ function renderWeather() {
 
   const nextWeekend = findNextWeekendIdx(daily.time);
   if (nextWeekend !== -1) {
-    const day = {
+    const dateStr = daily.time[nextWeekend];
+    const morningHours = getMorningHours(data, dateStr);
+    const verdict = morningHours.length ? morningPlayability(morningHours) : playabilityScore({
       weather_code: daily.weather_code[nextWeekend],
       temperature_2m_max: daily.temperature_2m_max[nextWeekend],
       temperature_2m_min: daily.temperature_2m_min[nextWeekend],
       precipitation_probability_max: daily.precipitation_probability_max[nextWeekend],
       wind_speed_10m_max: daily.wind_speed_10m_max[nextWeekend]
-    };
-    const verdict = playabilityScore(day);
-    const dayName = new Date(daily.time[nextWeekend] + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' });
+    });
+    const dayName = new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' });
     adviceEl.innerHTML = `
       <div class="play-advice ${verdict.rank}">
         <div class="verdict-icon">${verdict.rank === 'great' ? '🎾' : verdict.rank === 'ok' ? '⚠️' : '🚫'}</div>
         <div>
-          <div class="verdict-label">${dayName}'s outlook</div>
+          <div class="verdict-label">${dayName} morning · 6 AM – 12 PM</div>
           <div class="verdict-text">${verdict.reason}</div>
         </div>
       </div>`;
@@ -803,87 +857,93 @@ function renderWeather() {
 
   let html = '<div class="forecast-grid">';
   for (let i = 0; i < daily.time.length; i++) {
-    const day = {
-      weather_code: daily.weather_code[i],
-      temperature_2m_max: daily.temperature_2m_max[i],
-      temperature_2m_min: daily.temperature_2m_min[i],
-      precipitation_probability_max: daily.precipitation_probability_max[i],
-      wind_speed_10m_max: daily.wind_speed_10m_max[i]
-    };
-    const verdict = playabilityScore(day);
-    const d = new Date(daily.time[i] + 'T00:00:00');
+    const dateStr = daily.time[i];
+    const morningHours = getMorningHours(data, dateStr);
+    let verdict;
+    if (morningHours.length) {
+      verdict = morningPlayability(morningHours);
+    } else {
+      verdict = playabilityScore({
+        weather_code: daily.weather_code[i],
+        temperature_2m_max: daily.temperature_2m_max[i],
+        temperature_2m_min: daily.temperature_2m_min[i],
+        precipitation_probability_max: daily.precipitation_probability_max[i],
+        wind_speed_10m_max: daily.wind_speed_10m_max[i]
+      });
+    }
+    const tempMax = morningHours.length ? Math.max(...morningHours.map(h => h.temp)) : Math.round(daily.temperature_2m_max[i]);
+    const tempMin = morningHours.length ? Math.min(...morningHours.map(h => h.temp)) : Math.round(daily.temperature_2m_min[i]);
+    const peakRain = morningHours.length ? Math.max(...morningHours.map(h => h.rain)) : daily.precipitation_probability_max[i];
+    const peakWind = morningHours.length ? Math.max(...morningHours.map(h => h.wind)) : Math.round(daily.wind_speed_10m_max[i]);
+    const code = morningHours.length ? (morningHours[Math.floor(morningHours.length / 2)]?.code ?? daily.weather_code[i]) : daily.weather_code[i];
+    const d = new Date(dateStr + 'T00:00:00');
     const dayName = i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' });
     html += `
       <div class="forecast-day play-${verdict.rank}">
         <div class="day-name">${dayName}</div>
-        <div class="day-icon">${weatherIcon(day.weather_code)}</div>
-        <div class="day-temp">${Math.round(day.temperature_2m_max)}°</div>
-        <div class="day-low">${Math.round(day.temperature_2m_min)}°</div>
-        <div class="day-rain">💧 ${day.precipitation_probability_max}%</div>
-        <div class="day-wind">💨 ${Math.round(day.wind_speed_10m_max)}mph</div>
+        <div class="day-icon">${weatherIcon(code)}</div>
+        <div class="day-temp">${tempMax}°C</div>
+        <div class="day-low">${tempMin}°C</div>
+        <div class="day-rain">💧 ${peakRain}%</div>
+        <div class="day-wind">💨 ${peakWind}km/h</div>
       </div>`;
   }
   html += '</div>';
   forecastEl.innerHTML = html;
 
-  renderHourlyChart(data);
+  renderMorningChart(data);
 }
 
 function findNextWeekendIdx(dates) {
   for (let i = 0; i < dates.length; i++) {
     const d = new Date(dates[i] + 'T00:00:00');
-    const dow = d.getDay();
-    if (dow === 0 || dow === 6) return i;
+    if (d.getDay() === 0 || d.getDay() === 6) return i;
   }
   return -1;
 }
 
-function renderHourlyChart(data) {
+function renderMorningChart(data) {
   const canvas = document.getElementById('weatherChart');
-  if (!canvas) return;
-  const now = new Date();
-  const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 6);
-  const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 22);
 
-  const times = data.hourly.time;
-  const labels = [], temps = [], rain = [], wind = [];
-  for (let i = 0; i < times.length; i++) {
-    const t = new Date(times[i]);
-    if (t >= tomorrowStart && t <= tomorrowEnd) {
-      labels.push(t.toLocaleTimeString(undefined, { hour: 'numeric' }));
-      temps.push(Math.round(data.hourly.temperature_2m[i]));
-      rain.push(data.hourly.precipitation_probability[i]);
-      wind.push(Math.round(data.hourly.wind_speed_10m[i]));
-    }
-  }
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const tomorrowStr = new Date(today.getTime() + 86400000).toISOString().slice(0, 10);
+  const targetDate = getMorningHours(data, todayStr).length >= 3 ? todayStr : tomorrowStr;
+  const hours = getMorningHours(data, targetDate);
 
   if (weatherChart) weatherChart.destroy();
-  if (labels.length === 0) {
-    blankChart(canvas, 'Hourly data unavailable');
+  if (hours.length === 0) {
+    blankChart(canvas, 'Morning hourly data unavailable');
     return;
   }
+
+  const labels = hours.map(h => h.label);
+  const temps = hours.map(h => h.temp);
+  const rain = hours.map(h => h.rain);
+  const wind = hours.map(h => h.wind);
 
   weatherChart = new Chart(canvas, {
     type: 'line',
     data: {
       labels,
       datasets: [
-        { label: 'Temp (°F)', data: temps, borderColor: '#D85A30', backgroundColor: '#D85A30', yAxisID: 'y', tension: 0.3, pointRadius: 2 },
-        { label: 'Rain %', data: rain, borderColor: '#378ADD', backgroundColor: '#378ADD', yAxisID: 'y1', tension: 0.3, pointRadius: 2, borderDash: [4,2] },
-        { label: 'Wind (mph)', data: wind, borderColor: '#7F77DD', backgroundColor: '#7F77DD', yAxisID: 'y1', tension: 0.3, pointRadius: 2, borderDash: [2,3] }
+        { label: 'Temp (°C)', data: temps, borderColor: '#D85A30', backgroundColor: '#D85A30', yAxisID: 'y', tension: 0.3, pointRadius: 3 },
+        { label: 'Rain %', data: rain, borderColor: '#378ADD', backgroundColor: '#378ADD', yAxisID: 'y1', tension: 0.3, pointRadius: 3, borderDash: [4, 2] },
+        { label: 'Wind (km/h)', data: wind, borderColor: '#7F77DD', backgroundColor: '#7F77DD', yAxisID: 'y1', tension: 0.3, pointRadius: 3, borderDash: [2, 3] }
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       scales: {
-        y: { position: 'left', title: { display: true, text: '°F' } },
-        y1: { position: 'right', title: { display: true, text: '% / mph' }, grid: { drawOnChartArea: false }, min: 0 }
+        y: { position: 'left', title: { display: true, text: '°C' } },
+        y1: { position: 'right', title: { display: true, text: '% / km/h' }, grid: { drawOnChartArea: false }, min: 0 }
       },
       plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 12 } } } }
     }
   });
 }
+
 
 async function saveLocation() {
   const name = document.getElementById('location-name').value.trim();
@@ -947,43 +1007,86 @@ async function renderWeekendCoordinator() {
     const daily = weatherCache.data.daily;
     const idx = daily.time.indexOf(coordinatorDate);
     if (idx !== -1) {
-      const day = {
+      const morningHours = getMorningHours(weatherCache.data, coordinatorDate);
+      verdict = morningHours.length ? morningPlayability(morningHours) : playabilityScore({
         weather_code: daily.weather_code[idx],
         temperature_2m_max: daily.temperature_2m_max[idx],
         temperature_2m_min: daily.temperature_2m_min[idx],
         precipitation_probability_max: daily.precipitation_probability_max[idx],
         wind_speed_10m_max: daily.wind_speed_10m_max[idx]
-      };
-      verdict = playabilityScore(day);
+      });
+
+      const tempMin = morningHours.length ? Math.min(...morningHours.map(h => h.temp)) : Math.round(daily.temperature_2m_min[idx]);
+      const tempMax = morningHours.length ? Math.max(...morningHours.map(h => h.temp)) : Math.round(daily.temperature_2m_max[idx]);
+      const peakRain = morningHours.length ? Math.max(...morningHours.map(h => h.rain)) : daily.precipitation_probability_max[idx];
+      const peakWind = morningHours.length ? Math.max(...morningHours.map(h => h.wind)) : Math.round(daily.wind_speed_10m_max[idx]);
+      const code = morningHours.length ? (morningHours[Math.floor(morningHours.length / 2)]?.code ?? daily.weather_code[idx]) : daily.weather_code[idx];
+      const bestWin = findBestWindow(morningHours);
+      const sunrise = daily.sunrise ? daily.sunrise[idx]?.slice(11, 16) : null;
+
+      const bestWindowHtml = bestWin ? `
+        <div class="wc-best-window">
+          <span style="font-size:14px">🌟</span>
+          <div>
+            <div style="font-size:12px;font-weight:600">Best: ${bestWin.startLabel} – ${bestWin.endLabel}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${bestWin.temp}°C · 💧${bestWin.rain}% · 💨${bestWin.wind}km/h</div>
+          </div>
+        </div>` : '';
+
+      const hourlyGridHtml = morningHours.length ? `
+        <div class="wc-hour-grid">
+          ${morningHours.map(h => {
+            const isBest = bestWin && (h.label === bestWin.startLabel || h.label === bestWin.endLabel);
+            const isWarn = !isBest && (h.rain >= 30 || h.wind >= 20);
+            const cls = isBest ? 'wc-hour-cell best' : isWarn ? 'wc-hour-cell warn' : 'wc-hour-cell';
+            return `
+              <div class="${cls}">
+                <div class="wc-h-time">${h.label}</div>
+                <div class="wc-h-icon">${weatherIcon(h.code)}</div>
+                <div class="wc-h-temp">${h.temp}°C</div>
+                <div class="wc-h-rain">💧${h.rain}%</div>
+                <div class="wc-h-wind">💨${h.wind}</div>
+                ${isBest ? '<div class="wc-best-badge">Best</div>' : ''}
+              </div>`;
+          }).join('')}
+        </div>` : '';
+
       weatherColHtml = `
         <div class="wc-right">
           <div class="wc-weather-card">
             <div class="wc-weather-top">
-              <div class="wc-weather-icon">${weatherIcon(day.weather_code)}</div>
+              <div class="wc-weather-icon">${weatherIcon(code)}</div>
               <div class="wc-weather-main">
-                <div class="wc-weather-temp">${Math.round(day.temperature_2m_max)}° / ${Math.round(day.temperature_2m_min)}°F</div>
-                <div class="wc-weather-desc">${weatherLabel(day.weather_code)}</div>
+                <div class="wc-weather-temp">${tempMin}° – ${tempMax}°C</div>
+                <div class="wc-weather-desc">6 AM – 12 PM · ${weatherLabel(code)}</div>
               </div>
             </div>
             <div class="wc-weather-stats">
               <div class="wc-stat">
-                <div class="wc-stat-label">Rain chance</div>
-                <div class="wc-stat-value">💧 ${day.precipitation_probability_max}%</div>
+                <div class="wc-stat-label">Peak rain</div>
+                <div class="wc-stat-value">💧 ${peakRain}%</div>
               </div>
               <div class="wc-stat">
-                <div class="wc-stat-label">Wind speed</div>
-                <div class="wc-stat-value">💨 ${Math.round(day.wind_speed_10m_max)} mph</div>
+                <div class="wc-stat-label">Peak wind</div>
+                <div class="wc-stat-value">💨 ${peakWind} km/h</div>
               </div>
+              ${sunrise ? `
+              <div class="wc-stat">
+                <div class="wc-stat-label">Sunrise</div>
+                <div class="wc-stat-value">🌅 ${sunrise}</div>
+              </div>` : ''}
             </div>
           </div>
+          ${bestWindowHtml}
+          ${hourlyGridHtml}
           <div class="wc-verdict ${verdict.rank}">
-            ${verdict.rank === 'great' ? '🎾 Great day to play' : verdict.rank === 'ok' ? '⚠️ Playable — ' + verdict.reason : '🚫 ' + verdict.reason}
+            ${verdict.rank === 'great' ? '🎾 Great morning to play' : verdict.rank === 'ok' ? '⚠️ ' + verdict.reason : '🚫 ' + verdict.reason}
           </div>
         </div>`;
     }
   }
   if (!weatherColHtml) {
-    weatherColHtml = `<div class="wc-right"><div class="wc-no-weather">Open Weather tab once to load forecast</div></div>`;
+    weatherColHtml = `<div class="wc-right"><div class="wc-no-weather">Open Weather tab once to load morning forecast</div></div>`;
   }
 
   const toggleHtml = dates.length > 1 ? `
