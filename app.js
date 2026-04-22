@@ -524,11 +524,34 @@ function renderRotation() {
 
 function renderPlayersPanel() {
   const container = document.getElementById('player-inputs');
-  container.innerHTML = state.players.map((p, i) =>
-    `<input type="text" data-player-idx="${i}" value="${escapeHtml(p)}">`
-  ).join('');
+  const MAX = 6;
+  const slots = [...state.players];
+  while (slots.length < MAX) slots.push('');
+  container.innerHTML = slots.map((p, i) => `
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:12px;color:var(--text-muted);min-width:18px;">${i + 1}.</span>
+      <input type="text" data-player-idx="${i}" value="${escapeHtml(p)}" placeholder="Player ${i + 1} name" style="flex:1;">
+    </div>`).join('');
 }
 
+function savePlayers() {
+  const inputs = document.querySelectorAll('[data-player-idx]');
+  const next = [];
+  inputs.forEach(inp => { const v = inp.value.trim(); if (v) next.push(v); });
+  if (next.length < 5) { alert('You need at least 5 player names.'); return; }
+  if (next.length > 6) { alert('Maximum 6 players supported.'); return; }
+  if (new Set(next).size !== next.length) { alert('Player names must be unique.'); return; }
+  const rename = {};
+  state.players.forEach((old, i) => { if (next[i]) rename[old] = next[i]; });
+  state.matches = state.matches.map(m => ({
+    ...m,
+    teamA: m.teamA.map(p => rename[p] || p),
+    teamB: m.teamB.map(p => rename[p] || p)
+  }));
+  state.players = next;
+  saveState();
+  alert(`Saved ${next.length} players: ${next.join(', ')}`);
+}
 function renderLogForm() {
   ['a1','a2','b1','b2'].forEach(id => {
     const sel = document.getElementById(id);
