@@ -653,22 +653,6 @@ function saveMatch() {
 
 function showErr(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
 
-function savePlayers() {
-  const inputs = document.querySelectorAll('[data-player-idx]');
-  const next = [];
-  inputs.forEach(inp => { const v = inp.value.trim(); if (v) next.push(v); });
-  if (next.length < 5 || next.length > 6) { alert('You need 5 or 6 player names.'); return; }
-  if (new Set(next).size !== 5) { alert('Player names must be unique.'); return; }
-  const rename = {};
-  state.players.forEach((old, i) => { rename[old] = next[i]; });
-  state.matches = state.matches.map(m => ({
-    ...m,
-    teamA: m.teamA.map(p => rename[p] || p),
-    teamB: m.teamB.map(p => rename[p] || p)
-  }));
-  state.players = next;
-  saveState();
-}
 
 function resetAll() {
   if (!confirm('Delete ALL match data? This cannot be undone.')) return;
