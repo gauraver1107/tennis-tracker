@@ -160,6 +160,25 @@ function renderFilter() {
   sel.value = currentFilter;
 }
 
+function computePairStreaks() {
+  const streaks = {};
+  const sorted = sortedMatches();
+  sorted.forEach(m => {
+    const aWin = m.winner === 'A';
+    [[m.teamA, aWin],[m.teamB, !aWin]].forEach(([team, won]) => {
+      const key = [...team].sort().join('|');
+      if (!streaks[key]) streaks[key] = { names: [...team].sort().join(' & '), current: 0, longest: 0 };
+      if (won) {
+        streaks[key].current++;
+        if (streaks[key].current > streaks[key].longest) streaks[key].longest = streaks[key].current;
+      } else {
+        streaks[key].current = 0;
+      }
+    });
+  });
+  return streaks;
+}
+
 function renderSummary() {
   const matches = filteredMatches();
   const totalMatches = matches.length;
@@ -419,25 +438,6 @@ function renderChemistry() {
       </table>
     </div>
     <p class="hint" style="margin-top:8px">Best streak = longest consecutive wins ever. On fire = current active win streak.</p>`;
-}
-
-function computePairStreaks() {
-  const streaks = {};
-  const sorted = sortedMatches();
-  sorted.forEach(m => {
-    const aWin = m.winner === 'A';
-    [[m.teamA, aWin],[m.teamB, !aWin]].forEach(([team, won]) => {
-      const key = [...team].sort().join('|');
-      if (!streaks[key]) streaks[key] = { names: [...team].sort().join(' & '), current: 0, longest: 0 };
-      if (won) {
-        streaks[key].current++;
-        if (streaks[key].current > streaks[key].longest) streaks[key].longest = streaks[key].current;
-      } else {
-        streaks[key].current = 0;
-      }
-    });
-  });
-  return streaks;
 }
 
 function addPair(store, team, won) {
