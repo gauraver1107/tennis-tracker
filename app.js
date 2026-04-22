@@ -13,7 +13,7 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const DOC_REF = doc(db, 'tennis', 'shared');
 
-const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag'];
+const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang'];
 const ELO_START = 1200;
 const ELO_K = 32;
 
@@ -42,7 +42,7 @@ onSnapshot(DOC_REF, (snap) => {
   } else {
     state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [] };
   }
-  if (state.players.length !== 5) state.players = [...DEFAULT_PLAYERS];
+  if (state.players.length < 5) state.players = [...DEFAULT_PLAYERS];
   state.matches.forEach(m => {
     if (!m.sets) m.sets = [];
     m.sets.forEach(s => { if (s.tbA === undefined) s.tbA = null; if (s.tbB === undefined) s.tbB = null; });
@@ -166,17 +166,31 @@ function renderSummary() {
   const weekends = currentFilter === 'all' ? new Set(state.matches.map(m => m.date)).size : (matches.length > 0 ? 1 : 0);
   const totalSets = matches.reduce((acc, m) => acc + m.sets.length, 0);
   const totalGames = matches.reduce((acc, m) => acc + m.sets.reduce((a, s) => a + s.a + s.b, 0), 0);
+
+  const streaks = computePairStreaks();
+  const topStreak = Object.values(streaks).sort((a, b) => b.longest - a.longest)[0];
+
   const cards = [
     { label: 'Matches', value: totalMatches },
     { label: 'Weekends', value: weekends },
     { label: 'Sets', value: totalSets },
     { label: 'Games', value: totalGames }
   ];
-  document.getElementById('summary-cards').innerHTML = cards.map(c => `
-    <div class="summary-card">
-      <div class="label">${c.label}</div>
-      <div class="value">${c.value}</div>
-    </div>`).join('');
+  let streakCard = '';
+  if (topStreak && topStreak.longest > 0) {
+    streakCard = `
+      <div class="summary-card streak-card">
+        <div class="label">🔥 Best pair streak</div>
+        <div class="value">${topStreak.longest}</div>
+        <div class="streak-pair">${escapeHtml(topStreak.names)}</div>
+      </div>`;
+  }
+  document.getElementById('summary-cards').innerHTML =
+    cards.map(c => `
+      <div class="summary-card">
+        <div class="label">${c.label}</div>
+        <div class="value">${c.value}</div>
+      </div>`).join('') + streakCard;
 }
 
 function renderChampion() {
@@ -368,8 +382,13 @@ function renderChemistry() {
     addPair(pairStats, m.teamA, aWin);
     addPair(pairStats, m.teamB, !aWin);
   });
-  const arr = Object.values(pairStats)
-    .sort((a, b) => (b.wins / b.matches) - (a.wins / a.matches) || b.wins - a.wins);
+  const streaks = computePairStreaks();
+  const arr = Object.values(pairStats).map(p => ({
+    ...p,
+    longest: streaks[p.names.split(' & ').sort().join('|')]?.longest ?? 0,
+    current: streaks[p.names.split(' & ').sort().join('|')]?.current ?? 0
+  })).sort((a, b) => (b.wins / b.matches) - (a.wins / a.matches) || b.wins - a.wins);
+
   const list = document.getElementById('chemistry-list');
   if (arr.length === 0) {
     list.innerHTML = `<div class="hint" style="text-align:center; padding:2rem;">No pairings yet.</div>`;
@@ -378,17 +397,47 @@ function renderChemistry() {
   list.innerHTML = `
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Pairing</th><th class="right">W-L</th><th class="right">Win %</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Pairing</th>
+            <th class="right">W-L</th>
+            <th class="right">Win %</th>
+            <th class="right">Best streak</th>
+            <th class="right">On fire</th>
+          </tr>
+        </thead>
         <tbody>
           ${arr.map(p => `
             <tr>
               <td>${escapeHtml(p.names)}</td>
               <td class="right">${p.wins}-${p.matches - p.wins}</td>
               <td class="right">${Math.round((p.wins / p.matches) * 100)}%</td>
+              <td class="right">${p.longest > 0 ? `🏆 ${p.longest}` : '—'}</td>
+              <td class="right">${p.current >= 3 ? `🔥 ${p.current}` : p.current > 0 ? `${p.current}` : '—'}</td>
             </tr>`).join('')}
         </tbody>
       </table>
-    </div>`;
+    </div>
+    <p class="hint" style="margin-top:8px">Best streak = longest consecutive wins ever. On fire = current active win streak.</p>`;
+}
+
+function computePairStreaks() {
+  const streaks = {};
+  const sorted = sortedMatches();
+  sorted.forEach(m => {
+    const aWin = m.winner === 'A';
+    [[m.teamA, aWin],[m.teamB, !aWin]].forEach(([team, won]) => {
+      const key = [...team].sort().join('|');
+      if (!streaks[key]) streaks[key] = { names: [...team].sort().join(' & '), current: 0, longest: 0 };
+      if (won) {
+        streaks[key].current++;
+        if (streaks[key].current > streaks[key].longest) streaks[key].longest = streaks[key].current;
+      } else {
+        streaks[key].current = 0;
+      }
+    });
+  });
+  return streaks;
 }
 
 function addPair(store, team, won) {
@@ -399,8 +448,9 @@ function addPair(store, team, won) {
 
 function renderRotation() {
   const box = document.getElementById('rotation-suggestion');
-  if (state.players.length !== 5) {
-    box.innerHTML = `<div class="hint">Set up 5 players first.</div>`;
+  const n = state.players.length;
+  if (n < 5) {
+    box.innerHTML = `<div class="hint">Need at least 5 players set up.</div>`;
     return;
   }
   const matches = sortedMatches();
@@ -419,9 +469,12 @@ function renderRotation() {
     pairCounts[pA] = (pairCounts[pA] || 0) + 1;
     pairCounts[pB] = (pairCounts[pB] || 0) + 1;
   });
+
+  const sittingCount = n - 4;
   const sorted = [...state.players].sort((a, b) => restScore[b] - restScore[a]);
-  const sitOut = sorted[0];
-  const playing = state.players.filter(p => p !== sitOut);
+  const sittingOut = sorted.slice(0, sittingCount);
+  const playing = state.players.filter(p => !sittingOut.includes(p));
+
   const combos = [];
   for (let i = 0; i < playing.length; i++) {
     for (let j = i + 1; j < playing.length; j++) {
@@ -464,7 +517,7 @@ function renderRotation() {
       </div>
       <div class="rotation-sit">
         <span class="hint" style="margin:0">Sitting out</span>
-        <span class="name">${escapeHtml(sitOut)}</span>
+        <span class="name">${escapeHtml(sittingOut.join(' & '))}</span>
       </div>
     </div>`;
 }
@@ -581,7 +634,7 @@ function savePlayers() {
   const inputs = document.querySelectorAll('[data-player-idx]');
   const next = [];
   inputs.forEach(inp => { const v = inp.value.trim(); if (v) next.push(v); });
-  if (next.length !== 5) { alert('All 5 player names are required.'); return; }
+  if (next.length < 5 || next.length > 6) { alert('You need 5 or 6 player names.'); return; }
   if (new Set(next).size !== 5) { alert('Player names must be unique.'); return; }
   const rename = {};
   state.players.forEach((old, i) => { rename[old] = next[i]; });
