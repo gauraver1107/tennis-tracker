@@ -7,8 +7,8 @@ A shared doubles-tennis tracker for 5 friends. Real-time sync across phones, ELO
 ## 📋 What you need (all free)
 
 1. A **Google account** (for Firebase)
-2. A **GitHub account** (for hosting the code) — we'll create one
-3. A **Vercel account** (for the live website) — we'll create one
+2. A **GitHub account** (for hosting the code) 
+3. A **Vercel account** (for the live website) 
 
 **Total time:** about 45 minutes. **Total cost:** $0.
 
@@ -31,7 +31,7 @@ Firebase is Google's free service that will store your match data. The free tier
 
 1. In the left sidebar, click **"Build"** → **"Firestore Database"**
 2. Click **"Create database"**
-3. Choose **"Start in test mode"** (this lets your friends read/write for 30 days — we'll extend it later)
+3. Choose **"Start in test mode"** (this lets your friends read/write for 30 days )
 4. Pick a location near you (for US: `us-east1` or `us-central1`). Click **Enable**
 
 ### 1c. Register your web app
