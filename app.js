@@ -270,10 +270,11 @@ function renderLeaderboard() {
 }
 
 function renderCharts() {
-  const colors = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD'];
-  const dashes = [[], [6,4], [2,3], [8,4,2,4], [4,2]];
+  const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27'];
+  const DASHES = [[], [6,4], [2,3], [8,4,2,4], [4,2], [3,1]];
   const matches = sortedMatches();
 
+  // ── Option 1: Smooth filled area — win rate trend ──
   const running = {};
   state.players.forEach(p => { running[p] = { w: 0, total: 0, series: [] }; });
   matches.forEach(m => {
@@ -286,52 +287,136 @@ function renderCharts() {
     });
   });
   const labels = matches.map((m, i) => `#${i + 1}`);
-  const winDatasets = state.players.map((p, i) => ({
-    label: p, data: running[p].series,
-    borderColor: colors[i], backgroundColor: colors[i],
-    borderDash: dashes[i], tension: 0.2, pointRadius: 3, spanGaps: true
-  }));
 
   if (trendChart) trendChart.destroy();
   const winCanvas = document.getElementById('trendChart');
   if (labels.length === 0) {
     blankChart(winCanvas, 'Log a match to see trends');
   } else {
-    trendChart = new Chart(winCanvas, {
+    const winCtx = winCanvas.getContext('2d');
+    const winDatasets = state.players.map((p, i) => {
+      const grad = winCtx.createLinearGradient(0, 0, 0, 240);
+      grad.addColorStop(0, COLORS[i] + '55');
+      grad.addColorStop(1, COLORS[i] + '00');
+      return {
+        label: p,
+        data: running[p].series,
+        borderColor: COLORS[i],
+        backgroundColor: grad,
+        fill: true,
+        tension: 0.45,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        borderWidth: 2.5,
+        borderDash: DASHES[i],
+        spanGaps: true
+      };
+    });
+    trendChart = new Chart(winCtx, {
       type: 'line',
       data: { labels, datasets: winDatasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }, x: { title: { display: true, text: 'Match #' } } },
-        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 12 } } } }
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          y: {
+            min: 0, max: 100,
+            ticks: { callback: v => v + '%', font: { size: 11 } },
+            grid: { color: 'rgba(127,127,127,0.08)' }
+          },
+          x: {
+            title: { display: true, text: 'Match #', font: { size: 11 } },
+            grid: { color: 'rgba(127,127,127,0.08)' }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${ctx.dataset.label}: ${ctx.raw !== null ? ctx.raw + '%' : 'no matches yet'}`
+            }
+          }
+        }
       }
     });
+    renderChartLegend('trendLegend', state.players, COLORS, DASHES);
   }
 
+  // ── Option 6: ELO history with gradient fill ──
   const eloData = computeElo();
-  const eloDatasets = state.players.map((p, i) => ({
-    label: p,
-    data: eloData.history[p].map(pt => ({ x: pt.n, y: Math.round(pt.rating) })),
-    borderColor: colors[i], backgroundColor: colors[i],
-    borderDash: dashes[i], tension: 0.2, pointRadius: 3
-  }));
 
   if (eloChart) eloChart.destroy();
   const eloCanvas = document.getElementById('eloChart');
   if (matches.length === 0) {
     blankChart(eloCanvas, 'ELO appears after the first match');
   } else {
-    eloChart = new Chart(eloCanvas, {
+    const eloCtx = eloCanvas.getContext('2d');
+    const eloDatasets = state.players.map((p, i) => {
+      const grad = eloCtx.createLinearGradient(0, 0, 0, 240);
+      grad.addColorStop(0, COLORS[i] + '50');
+      grad.addColorStop(1, COLORS[i] + '00');
+      return {
+        label: p,
+        data: eloData.history[p].map(pt => ({ x: pt.n, y: Math.round(pt.rating) })),
+        borderColor: COLORS[i],
+        backgroundColor: grad,
+        fill: true,
+        tension: 0.35,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        borderWidth: 2,
+        borderDash: DASHES[i]
+      };
+    });
+    eloChart = new Chart(eloCtx, {
       type: 'line',
       data: { datasets: eloDatasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        scales: { x: { type: 'linear', title: { display: true, text: 'Match #' }, ticks: { stepSize: 1 } }, y: { title: { display: true, text: 'Rating' } } },
-        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 12 } } } }
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            type: 'linear',
+            title: { display: true, text: 'Match #', font: { size: 11 } },
+            ticks: { stepSize: 1 },
+            grid: { color: 'rgba(127,127,127,0.08)' }
+          },
+          y: {
+            title: { display: true, text: 'ELO rating', font: { size: 11 } },
+            grid: { color: 'rgba(127,127,127,0.08)' }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${ctx.dataset.label}: ${ctx.raw.y}`
+            }
+          }
+        }
       }
     });
+    renderChartLegend('eloLegend', state.players, COLORS, DASHES);
   }
 }
+
+function renderChartLegend(id, players, colors, dashes) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = players.map((p, i) => {
+    const dashStyle = dashes[i].length
+      ? `repeating-linear-gradient(to right, ${colors[i]} 0, ${colors[i]} ${dashes[i][0]}px, transparent ${dashes[i][0]}px, transparent ${dashes[i][0] + (dashes[i][1] || 4)}px)`
+      : 'none';
+    const solidBg = dashes[i].length ? 'transparent' : colors[i];
+    return `
+      <span class="chart-legend-item">
+        <span class="chart-legend-line" style="background:${solidBg};${dashes[i].length ? `background-image:${dashStyle}` : ''}; border-color:${colors[i]}"></span>
+        ${escapeHtml(p)}
+      </span>`;
+  }).join('');
+}
+
+
 
 function blankChart(canvas, msg) {
   const ctx = canvas.getContext('2d');
