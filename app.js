@@ -812,69 +812,163 @@ function setupVoiceEntry() {
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    btn.title = 'Voice not supported in this browser — use Chrome or Safari';
+    btn.title = 'Voice not supported — use Chrome or Safari';
     btn.style.opacity = '0.4';
     btn.style.cursor = 'not-allowed';
     document.querySelector('.voice-sub').textContent = 'Voice not supported — use Chrome or Safari on mobile';
     return;
   }
 
-  recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.lang = 'en-US';
+  // ── State ──────────────────────────────────────────────
+  let isListening   = false;   // user intent — true between tap-start and tap-stop
+  let accumulatedTranscript = ''; // all confirmed text across restarts
+  let timerInterval = null;
+  let startTime     = null;
+  let restartTimer  = null;
 
-  let finalTranscript = '';
+  function createRecognition() {
+    const r = new SpeechRecognition();
+    r.continuous      = true;   // don't stop after one sentence
+    r.interimResults  = true;
+    r.lang            = 'en-US';
+    r.maxAlternatives = 1;
+    return r;
+  }
 
-  recognition.onstart = () => {
+  function startTimer() {
+    startTime = Date.now();
+    timerInterval = setInterval(() => {
+      if (!isListening) return;
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const mins = Math.floor(elapsed / 60).toString().padStart(2,'0');
+      const secs = (elapsed % 60).toString().padStart(2,'0');
+      const current = accumulatedTranscript.trim();
+      showVoiceTranscript(
+        `🔴 Recording ${mins}:${secs}  (tap ⏹️ to stop)\n` +
+        (current ? `"${current}"` : 'Listening… speak now')
+      );
+    }, 500);
+  }
+
+  function stopTimer() {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+
+  function startListening() {
+    isListening = true;
+    accumulatedTranscript = '';
     btn.classList.add('listening');
     btn.textContent = '⏹️';
-    btn.title = 'Tap to stop';
-    showVoiceTranscript('Listening… speak your match result');
+    btn.title = 'Tap to stop recording';
     hideEl('voice-parsed');
     hideEl('voice-error');
-    finalTranscript = '';
-  };
+    startTimer();
+    launchRecognition();
+  }
 
-  recognition.onresult = (e) => {
-    let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
-      else interim += e.results[i][0].transcript;
-    }
-    showVoiceTranscript('"' + (finalTranscript + interim).trim() + '"');
-  };
-
-  recognition.onend = () => {
+  function stopListening() {
+    isListening = false;
+    clearTimeout(restartTimer);
+    stopTimer();
+    try { recognition.stop(); } catch(e) {}
     btn.classList.remove('listening');
     btn.textContent = '🎤';
     btn.title = 'Tap to speak';
-    if (finalTranscript.trim()) {
-      pendingTranscript = finalTranscript.trim();
-      parseWithLLM(pendingTranscript);
+    const final = accumulatedTranscript.trim();
+    if (final) {
+      pendingTranscript = final;
+      showVoiceTranscript(`✅ Recorded: "${final}"\nParsing…`);
+      parseWithLLM(final);
     } else {
-      showVoiceTranscript('Nothing detected — tap the mic and try again');
+      showVoiceTranscript('Nothing captured — tap the mic and speak clearly');
     }
-  };
+  }
 
-  recognition.onerror = (e) => {
-    btn.classList.remove('listening');
-    btn.textContent = '🎤';
-    const msgs = { 'not-allowed': 'Microphone permission denied — check browser settings', 'network': 'Network error', 'no-speech': 'No speech detected — try again' };
-    showVoiceError(msgs[e.error] || 'Mic error: ' + e.error);
-  };
+  function launchRecognition() {
+    recognition = createRecognition();
 
+    recognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          accumulatedTranscript += e.results[i][0].transcript + ' ';
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      // Update display live with accumulated + interim
+      const display = (accumulatedTranscript + interim).trim();
+      const elapsed = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
+      const mins = Math.floor(elapsed / 60).toString().padStart(2,'0');
+      const secs = (elapsed % 60).toString().padStart(2,'0');
+      showVoiceTranscript(`🔴 Recording ${mins}:${secs}  (tap ⏹️ to stop)\n"${display}"`);
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if user hasn't tapped stop
+      if (isListening) {
+        restartTimer = setTimeout(() => {
+          if (isListening) {
+            try { recognition.start(); }
+            catch(e) {
+              // If start fails, recreate and try again
+              launchRecognition();
+            }
+          }
+        }, 200);
+      }
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error === 'not-allowed') {
+        isListening = false;
+        stopTimer();
+        btn.classList.remove('listening');
+        btn.textContent = '🎤';
+        showVoiceError('Microphone permission denied — check your browser settings');
+        return;
+      }
+      // For no-speech or aborted — just restart silently if still listening
+      if (isListening && (e.error === 'no-speech' || e.error === 'aborted')) {
+        restartTimer = setTimeout(() => {
+          if (isListening) launchRecognition();
+        }, 300);
+        return;
+      }
+      // Any other error — stop and show message
+      if (isListening) {
+        isListening = false;
+        stopTimer();
+        btn.classList.remove('listening');
+        btn.textContent = '🎤';
+        const msgs = { 'network': 'Network error — check your connection', 'audio-capture': 'Could not access microphone' };
+        showVoiceError(msgs[e.error] || `Mic error: ${e.error}`);
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch(e) {
+      showVoiceError('Could not start microphone: ' + e.message);
+      isListening = false;
+      stopTimer();
+      btn.classList.remove('listening');
+      btn.textContent = '🎤';
+    }
+  }
+
+  // ── Button handler ──────────────────────────────────────
   btn.addEventListener('click', () => {
-    if (btn.classList.contains('listening')) {
-      recognition.stop();
-    } else if (btn.classList.contains('parsing')) {
-      // do nothing while parsing
+    if (btn.classList.contains('parsing')) return; // ignore while AI is working
+    if (isListening) {
+      stopListening();
     } else {
-      try { recognition.start(); }
-      catch(e) { showVoiceError('Could not start mic: ' + e.message); }
+      startListening();
     }
   });
 }
+
 
 async function parseWithLLM(transcript) {
   const btn = document.getElementById('voice-btn');
@@ -1031,11 +1125,7 @@ function applyParsedResult(encoded) {
 function retryVoice() {
   hideEl('voice-parsed');
   hideEl('voice-error');
-  const btn = document.getElementById('voice-btn');
-  if (btn && recognition) {
-    try { recognition.start(); }
-    catch(e) { showVoiceError('Tap the mic button to try again.'); }
-  }
+  showVoiceTranscript('Tap the 🎤 mic button to record again');
 }
 
 function showVoiceTranscript(text) {
