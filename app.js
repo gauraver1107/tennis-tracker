@@ -1364,14 +1364,24 @@ function morningPlayability(hours) {
 }
 
 function findBestWindow(hours) {
-  if (!hours || hours.length < 2) return null;
+  if (!hours || hours.length < 3) return null;
   let bestScore = Infinity, bestIdx = 0;
-  for (let i = 0; i < hours.length - 1; i++) {
-    const score = hours[i].rain + hours[i + 1].rain + hours[i].wind + hours[i + 1].wind;
+  // Scan every 3-consecutive-hour window, pick lowest combined rain + wind
+  for (let i = 0; i <= hours.length - 3; i++) {
+    const score = hours[i].rain   + hours[i+1].rain   + hours[i+2].rain
+                + hours[i].wind   + hours[i+1].wind   + hours[i+2].wind;
     if (score < bestScore) { bestScore = score; bestIdx = i; }
   }
-  const a = hours[bestIdx], b = hours[bestIdx + 1];
-  return { startLabel: a.label, endLabel: b.label, temp: Math.round((a.temp + b.temp) / 2), rain: Math.max(a.rain, b.rain), wind: Math.max(a.wind, b.wind), code: a.code };
+  const a = hours[bestIdx], b = hours[bestIdx + 1], c = hours[bestIdx + 2];
+  return {
+    startLabel: a.label,
+    endLabel:   c.label,
+    midLabel:   b.label,
+    temp: Math.round((a.temp + b.temp + c.temp) / 3),
+    rain: Math.max(a.rain, b.rain, c.rain),
+    wind: Math.max(a.wind, b.wind, c.wind),
+    code: b.code  // middle hour is most representative
+  };
 }
 
 function weatherIcon(code) {
@@ -1656,7 +1666,7 @@ async function renderWeekendCoordinator() {
       const hourlyGridHtml = morningHours.length ? `
         <div class="wc-hour-grid">
           ${morningHours.map(h => {
-            const isBest = bestWin && (h.label === bestWin.startLabel || h.label === bestWin.endLabel);
+            const isBest = bestWin && (h.label === bestWin.startLabel || h.label === bestWin.midLabel || h.label === bestWin.endLabel);
             const isWarn = !isBest && (h.rain >= 30 || h.wind >= 20);
             const cls = isBest ? 'wc-hour-cell best' : isWarn ? 'wc-hour-cell warn' : 'wc-hour-cell';
             return `
