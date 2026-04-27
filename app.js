@@ -920,7 +920,7 @@ Respond ONLY with valid JSON, no explanation:
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 400,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -1867,13 +1867,13 @@ window.applyParsedResult = applyParsedResult;
 window.retryVoice = retryVoice;
 window.shareVoteToWhatsApp = shareVoteToWhatsApp;
 setupPhotoTab();
-document.getElementById('save-match').addEventListener('click', saveMatch);
-document.getElementById('save-players').addEventListener('click', savePlayers);
-document.getElementById('reset-all').addEventListener('click', resetAll);
-document.getElementById('export-csv').addEventListener('click', exportCsv);
-document.getElementById('reshuffle').addEventListener('click', renderRotation);
-document.getElementById('save-location').addEventListener('click', saveLocation);
-document.getElementById('filter-weekend').addEventListener('change', (e) => {
+document.getElementById('save-match')?.addEventListener('click', saveMatch);
+document.getElementById('save-players')?.addEventListener('click', savePlayers);
+document.getElementById('reset-all')?.addEventListener('click', resetAll);
+document.getElementById('export-csv')?.addEventListener('click', exportCsv);
+document.getElementById('reshuffle')?.addEventListener('click', renderRotation);
+document.getElementById('save-location')?.addEventListener('click', saveLocation);
+document.getElementById('filter-weekend')?.addEventListener('change', (e) => {
   currentFilter = e.target.value;
   renderSummary();
   renderChampion();
