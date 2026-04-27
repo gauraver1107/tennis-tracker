@@ -876,21 +876,25 @@ function setupVoiceEntry() {
   }
 
   function stopListening() {
-    isListening = false;
+    isListening = false;          // set BEFORE stop() so onend doesn't restart
     clearTimeout(restartTimer);
     stopTimer();
     try { recognition.stop(); } catch(e) {}
     btn.classList.remove('listening');
     btn.textContent = '🎤';
     btn.title = 'Tap to speak';
-    const final = accumulatedTranscript.trim();
-    if (final) {
-      pendingTranscript = final;
-      showVoiceTranscript(`✅ Recorded: "${final}"\nParsing…`);
-      parseWithLLM(final);
-    } else {
-      showVoiceTranscript('Nothing captured — tap the mic and speak clearly');
-    }
+
+    // Small delay to let final onresult fire before we read accumulatedTranscript
+    setTimeout(() => {
+      const final = accumulatedTranscript.trim();
+      if (final) {
+        pendingTranscript = final;
+        showVoiceTranscript(`✅ Recorded: "${final}"\nParsing with Claude…`);
+        parseWithLLM(final);
+      } else {
+        showVoiceTranscript('Nothing captured — tap the mic and speak clearly');
+      }
+    }, 300);
   }
 
   function launchRecognition() {
@@ -1082,6 +1086,9 @@ function showParsedResult(parsed, original) {
   el.classList.remove('hidden');
   hideEl('voice-error');
 
+  // Scroll the card into view so user sees it
+  setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+
   // Wire buttons safely — no inline onclick encoding
   document.getElementById('apply-parsed-btn')?.addEventListener('click', () => applyParsedResult());
   document.getElementById('retry-voice-btn')?.addEventListener('click', () => retryVoice());
@@ -1134,9 +1141,12 @@ function applyParsedResult() {
       if (notesEl && !notesEl.value) notesEl.value = parsed.notes;
     }
 
-    // Hide parsed result, show success
+    // Hide parsed result, show success and scroll to form
     hideEl('voice-parsed');
     showVoiceTranscript('✅ Applied! Review the form below and tap Save match.');
+    setTimeout(() => {
+      document.getElementById('a1')?.closest('.card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
 
   } catch(e) {
     showVoiceError('Could not apply — please fill the form manually.');
