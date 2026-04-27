@@ -1142,7 +1142,7 @@ function shareVoteToWhatsApp(encodedMsg) {
   document.getElementById('vote-toast')?.remove();
 }
 
-
+function setupShareModal() {
   const modal = document.getElementById('share-modal');
   document.getElementById('share-whatsapp').addEventListener('click', () => {
     const text = document.getElementById('share-text').value;
