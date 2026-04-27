@@ -798,6 +798,8 @@ const ANTHROPIC_KEY_STORE = 'tennis_anthropic_key';
 let recognition = null;
 let pendingTranscript = '';
 let pendingApiCallback = null;
+let lastParsedResult = null;
+let lastVoteMsg = '';
 
 function getApiKey() {
   return localStorage.getItem(ANTHROPIC_KEY_STORE) || '';
@@ -1045,6 +1047,8 @@ function showParsedResult(parsed, original) {
   const el = document.getElementById('voice-parsed');
   if (!el) return;
 
+  lastParsedResult = parsed; // store safely — no encoding needed
+
   const confColor = parsed.confidence === 'high' ? 'var(--accent)' : parsed.confidence === 'medium' ? '#EF9F27' : '#D85A30';
   const setsStr = (parsed.sets || []).map(s => `${s.a}-${s.b}`).join(', ') || '—';
   const teamAStr = (parsed.teamA || []).join(' & ') || '—';
@@ -1060,16 +1064,22 @@ function showParsedResult(parsed, original) {
     ${parsed.notes ? `<div class="vp-row"><span class="vp-label">Notes</span><span class="vp-val">${escapeHtml(parsed.notes)}</span></div>` : ''}
     <div class="vp-row" style="border-bottom:none"><span class="vp-label" style="font-style:italic;font-size:12px">"${escapeHtml(parsed.interpretation || '')}"</span></div>
     <div class="vp-actions">
-      <button class="btn-small" onclick="applyParsedResult(${encodeURIComponent(JSON.stringify(parsed))})">✅ Apply to form</button>
-      <button class="btn-small" onclick="retryVoice()">🔄 Try again</button>
+      <button class="btn-small" id="apply-parsed-btn">✅ Apply to form</button>
+      <button class="btn-small" id="retry-voice-btn">🔄 Try again</button>
     </div>`;
+
   el.classList.remove('hidden');
   hideEl('voice-error');
+
+  // Wire buttons safely — no inline onclick encoding
+  document.getElementById('apply-parsed-btn')?.addEventListener('click', () => applyParsedResult());
+  document.getElementById('retry-voice-btn')?.addEventListener('click', () => retryVoice());
 }
 
-function applyParsedResult(encoded) {
+function applyParsedResult() {
+  const parsed = lastParsedResult;
+  if (!parsed) { showVoiceError('No parsed result — record a match first.'); return; }
   try {
-    const parsed = JSON.parse(decodeURIComponent(encoded));
     const players = state.players;
 
     // Apply teams — fuzzy match parsed names to actual player names
@@ -1218,9 +1228,18 @@ function showVoteShareToast(player, vote, dateStr) {
       <strong>${escapeHtml(player)} voted ${voteLabel}</strong>
       Share to WhatsApp group?
     </div>
-    <button class="toast-btn" onclick="shareVoteToWhatsApp(${encodeURIComponent(msg)})">Share</button>
-    <button class="toast-close" onclick="document.getElementById('vote-toast')?.remove()">✕</button>`;
+    <button class="toast-btn" id="vote-toast-share-btn">Share</button>
+    <button class="toast-close" id="vote-toast-close-btn">✕</button>`;
   document.body.appendChild(toast);
+
+  lastVoteMsg = msg;
+  document.getElementById('vote-toast-share-btn')?.addEventListener('click', () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(lastVoteMsg)}`, '_blank');
+    document.getElementById('vote-toast')?.remove();
+  });
+  document.getElementById('vote-toast-close-btn')?.addEventListener('click', () => {
+    document.getElementById('vote-toast')?.remove();
+  });
 
   // Auto-dismiss after 8 seconds
   setTimeout(() => { document.getElementById('vote-toast')?.remove(); }, 8000);
