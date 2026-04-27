@@ -17,7 +17,7 @@ const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang'];
 const ELO_START = 1200;
 const ELO_K = 32;
 
-let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [] };
+let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '' };
 let trendChart = null, eloChart = null, weatherChart = null;
 let currentFilter = 'all';
 let isSyncing = false;
@@ -37,10 +37,11 @@ onSnapshot(DOC_REF, (snap) => {
       matches: data.matches || [],
       location: data.location || null,
       availability: data.availability || {},
-      photos: data.photos || []
+      photos: data.photos || [],
+      apiKey: data.apiKey || ''
     };
   } else {
-    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [] };
+    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [], apiKey: '' };
   }
   if (state.players.length < 5) state.players = [...DEFAULT_PLAYERS];
   state.matches.forEach(m => {
@@ -802,10 +803,15 @@ let lastParsedResult = null;
 let lastVoteMsg = '';
 
 function getApiKey() {
-  return localStorage.getItem(ANTHROPIC_KEY_STORE) || '';
+  // Firebase first (shared across all devices), localStorage as offline fallback
+  return state.apiKey || localStorage.getItem(ANTHROPIC_KEY_STORE) || '';
 }
-function saveApiKey(key) {
-  localStorage.setItem(ANTHROPIC_KEY_STORE, key.trim());
+
+async function saveApiKey(key) {
+  const trimmed = key.trim();
+  localStorage.setItem(ANTHROPIC_KEY_STORE, trimmed); // offline fallback
+  state.apiKey = trimmed;
+  await saveState(); // saves to Firebase → syncs to all devices instantly
 }
 
 function setupVoiceEntry() {
@@ -1024,7 +1030,12 @@ Respond ONLY with valid JSON, no explanation:
 
     if (!res.ok) {
       const err = await res.json();
-      if (res.status === 401) { localStorage.removeItem(ANTHROPIC_KEY_STORE); showVoiceError('Invalid API key — please re-enter.'); }
+      if (res.status === 401) {
+        localStorage.removeItem(ANTHROPIC_KEY_STORE);
+        state.apiKey = '';
+        saveState();
+        showVoiceError('Invalid API key — please re-enter.');
+      }
       else showVoiceError('API error: ' + (err.error?.message || res.status));
       return;
     }
@@ -1162,10 +1173,15 @@ function openApiKeyModal() {
 }
 
 function setupApiKeyModal() {
-  document.getElementById('apikey-save').addEventListener('click', () => {
+  document.getElementById('apikey-save').addEventListener('click', async () => {
     const key = document.getElementById('apikey-input').value.trim();
     if (!key.startsWith('sk-ant-')) { alert('Key should start with sk-ant-'); return; }
-    saveApiKey(key);
+    const btn = document.getElementById('apikey-save');
+    btn.textContent = 'Saving…';
+    btn.disabled = true;
+    await saveApiKey(key);
+    btn.textContent = 'Save & parse';
+    btn.disabled = false;
     document.getElementById('apikey-modal').classList.add('hidden');
     if (pendingApiCallback) { pendingApiCallback(); pendingApiCallback = null; }
   });
