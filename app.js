@@ -792,7 +792,357 @@ function openShareModal(m) {
   modal.classList.remove('hidden');
 }
 
-function setupShareModal() {
+// ── Voice entry + LLM parsing ──────────────────────────────────────────────
+
+const ANTHROPIC_KEY_STORE = 'tennis_anthropic_key';
+let recognition = null;
+let pendingTranscript = '';
+let pendingApiCallback = null;
+
+function getApiKey() {
+  return localStorage.getItem(ANTHROPIC_KEY_STORE) || '';
+}
+function saveApiKey(key) {
+  localStorage.setItem(ANTHROPIC_KEY_STORE, key.trim());
+}
+
+function setupVoiceEntry() {
+  const btn = document.getElementById('voice-btn');
+  if (!btn) return;
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    btn.title = 'Voice not supported in this browser — use Chrome or Safari';
+    btn.style.opacity = '0.4';
+    btn.style.cursor = 'not-allowed';
+    document.querySelector('.voice-sub').textContent = 'Voice not supported — use Chrome or Safari on mobile';
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  let finalTranscript = '';
+
+  recognition.onstart = () => {
+    btn.classList.add('listening');
+    btn.textContent = '⏹️';
+    btn.title = 'Tap to stop';
+    showVoiceTranscript('Listening… speak your match result');
+    hideEl('voice-parsed');
+    hideEl('voice-error');
+    finalTranscript = '';
+  };
+
+  recognition.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript + ' ';
+      else interim += e.results[i][0].transcript;
+    }
+    showVoiceTranscript('"' + (finalTranscript + interim).trim() + '"');
+  };
+
+  recognition.onend = () => {
+    btn.classList.remove('listening');
+    btn.textContent = '🎤';
+    btn.title = 'Tap to speak';
+    if (finalTranscript.trim()) {
+      pendingTranscript = finalTranscript.trim();
+      parseWithLLM(pendingTranscript);
+    } else {
+      showVoiceTranscript('Nothing detected — tap the mic and try again');
+    }
+  };
+
+  recognition.onerror = (e) => {
+    btn.classList.remove('listening');
+    btn.textContent = '🎤';
+    const msgs = { 'not-allowed': 'Microphone permission denied — check browser settings', 'network': 'Network error', 'no-speech': 'No speech detected — try again' };
+    showVoiceError(msgs[e.error] || 'Mic error: ' + e.error);
+  };
+
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('listening')) {
+      recognition.stop();
+    } else if (btn.classList.contains('parsing')) {
+      // do nothing while parsing
+    } else {
+      try { recognition.start(); }
+      catch(e) { showVoiceError('Could not start mic: ' + e.message); }
+    }
+  });
+}
+
+async function parseWithLLM(transcript) {
+  const btn = document.getElementById('voice-btn');
+  const key = getApiKey();
+  if (!key) {
+    pendingApiCallback = () => parseWithLLM(transcript);
+    openApiKeyModal();
+    return;
+  }
+
+  btn.classList.add('parsing');
+  btn.textContent = '⏳';
+  showVoiceTranscript('Parsing: "' + transcript + '"');
+
+  const playerList = state.players.join(', ');
+  const prompt = `You are a tennis match parser. Given a spoken description of a doubles tennis match, extract the structured data.
+
+Players in this group: ${playerList}
+
+Match description: "${transcript}"
+
+Rules:
+- Match player names from the description to the closest name in the player list (handle speech-to-text errors, abbreviations, nicknames)
+- Extract set scores as arrays of {a, b} where a = Team A games, b = Team B games
+- Team A is the team mentioned first or the winners if "beat/def/won" language is used
+- If scores are spoken as words convert them: "six three" → 6-3, "seven six" → 7-6
+- If only one score is mentioned assume it's one set
+- If no scores detected set sets to []
+- If player names are ambiguous make your best guess
+
+Respond ONLY with valid JSON, no explanation:
+{
+  "teamA": ["PlayerName1", "PlayerName2"],
+  "teamB": ["PlayerName3", "PlayerName4"],
+  "sets": [{"a": 6, "b": 3}],
+  "notes": "any extra context mentioned",
+  "confidence": "high|medium|low",
+  "interpretation": "one sentence describing what you understood"
+}`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      if (res.status === 401) { localStorage.removeItem(ANTHROPIC_KEY_STORE); showVoiceError('Invalid API key — please re-enter.'); }
+      else showVoiceError('API error: ' + (err.error?.message || res.status));
+      return;
+    }
+
+    const data = await res.json();
+    const raw = data.content[0]?.text || '';
+    const cleaned = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+    showParsedResult(parsed, transcript);
+
+  } catch(e) {
+    showVoiceError('Parse failed: ' + e.message + ' — try rephrasing or fill manually.');
+  } finally {
+    btn.classList.remove('parsing');
+    btn.textContent = '🎤';
+  }
+}
+
+function showParsedResult(parsed, original) {
+  const el = document.getElementById('voice-parsed');
+  if (!el) return;
+
+  const confColor = parsed.confidence === 'high' ? 'var(--accent)' : parsed.confidence === 'medium' ? '#EF9F27' : '#D85A30';
+  const setsStr = (parsed.sets || []).map(s => `${s.a}-${s.b}`).join(', ') || '—';
+  const teamAStr = (parsed.teamA || []).join(' & ') || '—';
+  const teamBStr = (parsed.teamB || []).join(' & ') || '—';
+
+  el.innerHTML = `
+    <div class="vp-title">Parsed result
+      <span style="margin-left:8px;padding:1px 7px;border-radius:4px;font-size:10px;background:${confColor}22;color:${confColor}">${parsed.confidence || '?'} confidence</span>
+    </div>
+    <div class="vp-row"><span class="vp-label">Team A</span><span class="vp-val">${escapeHtml(teamAStr)}</span></div>
+    <div class="vp-row"><span class="vp-label">Team B</span><span class="vp-val">${escapeHtml(teamBStr)}</span></div>
+    <div class="vp-row"><span class="vp-label">Sets</span><span class="vp-val">${escapeHtml(setsStr)}</span></div>
+    ${parsed.notes ? `<div class="vp-row"><span class="vp-label">Notes</span><span class="vp-val">${escapeHtml(parsed.notes)}</span></div>` : ''}
+    <div class="vp-row" style="border-bottom:none"><span class="vp-label" style="font-style:italic;font-size:12px">"${escapeHtml(parsed.interpretation || '')}"</span></div>
+    <div class="vp-actions">
+      <button class="btn-small" onclick="applyParsedResult(${encodeURIComponent(JSON.stringify(parsed))})">✅ Apply to form</button>
+      <button class="btn-small" onclick="retryVoice()">🔄 Try again</button>
+    </div>`;
+  el.classList.remove('hidden');
+  hideEl('voice-error');
+}
+
+function applyParsedResult(encoded) {
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encoded));
+    const players = state.players;
+
+    // Apply teams — fuzzy match parsed names to actual player names
+    const findPlayer = (name) => {
+      if (!name) return '';
+      const lower = name.toLowerCase();
+      return players.find(p => p.toLowerCase() === lower) ||
+             players.find(p => p.toLowerCase().startsWith(lower.slice(0,3))) ||
+             players.find(p => lower.includes(p.toLowerCase().slice(0,3))) || '';
+    };
+
+    const a1 = findPlayer(parsed.teamA?.[0]);
+    const a2 = findPlayer(parsed.teamA?.[1]);
+    const b1 = findPlayer(parsed.teamB?.[0]);
+    const b2 = findPlayer(parsed.teamB?.[1]);
+
+    if (a1) document.getElementById('a1').value = a1;
+    if (a2) document.getElementById('a2').value = a2;
+    if (b1) document.getElementById('b1').value = b1;
+    if (b2) document.getElementById('b2').value = b2;
+    updateSittingOut();
+
+    // Apply sets
+    if (parsed.sets?.length) {
+      const format = Math.max(parsed.sets.length, 1);
+      document.getElementById('sets-format').value = format <= 1 ? '1' : format <= 3 ? '3' : '5';
+      renderSetsInputs();
+      setTimeout(() => {
+        parsed.sets.forEach((set, i) => {
+          const aInput = document.querySelector(`input[data-set="${i}"][data-field="a"]`);
+          const bInput = document.querySelector(`input[data-set="${i}"][data-field="b"]`);
+          if (aInput) aInput.value = set.a;
+          if (bInput) bInput.value = set.b;
+        });
+      }, 50);
+    }
+
+    // Apply notes
+    if (parsed.notes) {
+      const notesEl = document.getElementById('match-notes');
+      if (notesEl && !notesEl.value) notesEl.value = parsed.notes;
+    }
+
+    // Hide parsed result, show success
+    hideEl('voice-parsed');
+    showVoiceTranscript('✅ Applied! Review the form below and tap Save match.');
+
+  } catch(e) {
+    showVoiceError('Could not apply — please fill the form manually.');
+  }
+}
+
+function retryVoice() {
+  hideEl('voice-parsed');
+  hideEl('voice-error');
+  const btn = document.getElementById('voice-btn');
+  if (btn && recognition) {
+    try { recognition.start(); }
+    catch(e) { showVoiceError('Tap the mic button to try again.'); }
+  }
+}
+
+function showVoiceTranscript(text) {
+  const el = document.getElementById('voice-transcript');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+function showVoiceError(text) {
+  const el = document.getElementById('voice-error');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove('hidden');
+  hideEl('voice-parsed');
+}
+function hideEl(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('hidden');
+}
+
+function openApiKeyModal() {
+  document.getElementById('apikey-input').value = getApiKey();
+  document.getElementById('apikey-modal').classList.remove('hidden');
+}
+
+function setupApiKeyModal() {
+  document.getElementById('apikey-save').addEventListener('click', () => {
+    const key = document.getElementById('apikey-input').value.trim();
+    if (!key.startsWith('sk-ant-')) { alert('Key should start with sk-ant-'); return; }
+    saveApiKey(key);
+    document.getElementById('apikey-modal').classList.add('hidden');
+    if (pendingApiCallback) { pendingApiCallback(); pendingApiCallback = null; }
+  });
+  document.getElementById('apikey-cancel').addEventListener('click', () => {
+    document.getElementById('apikey-modal').classList.add('hidden');
+    pendingApiCallback = null;
+  });
+}
+
+// ── Vote WhatsApp share ────────────────────────────────────────────────────
+
+function buildVoteShareMessage(player, vote, dateStr) {
+  const votesForDate = state.availability[dateStr] || {};
+  const counts = { in: 0, maybe: 0, out: 0 };
+  state.players.forEach(p => { const v = votesForDate[p]; if (v) counts[v]++; });
+  const dayName = new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const voteEmoji = vote === 'in' ? '✅' : vote === 'maybe' ? '❓' : '❌';
+  const voteLabel = vote === 'in' ? 'IN' : vote === 'maybe' ? 'MAYBE' : 'OUT';
+  let msg = `🎾 Weekend Tennis Update\n\n`;
+  msg += `${voteEmoji} ${player} voted ${voteLabel} for ${dayName}\n\n`;
+  msg += `Current votes:\n`;
+  msg += `✅ In: ${counts.in} · ❓ Maybe: ${counts.maybe} · ❌ Out: ${counts.out}\n\n`;
+  if (counts.in >= 4) msg += `🏆 Enough for doubles! Come vote 👇\n`;
+  else if (counts.in + counts.maybe >= 4) msg += `⏳ Almost there — maybes please confirm!\n`;
+  else msg += `Waiting for more votes 👇\n`;
+  const weatherVerdict = getWeatherVerdictText(dateStr);
+  if (weatherVerdict) msg += `\n🌤️ Weather: ${weatherVerdict}\n`;
+  msg += `\n${window.location.href.split('?')[0]}`;
+  return msg;
+}
+
+function getWeatherVerdictText(dateStr) {
+  if (!weatherCache.data) return null;
+  try {
+    const daily = weatherCache.data.daily;
+    const idx = daily.time.indexOf(dateStr);
+    if (idx === -1) return null;
+    const rain = daily.precipitation_probability_max[idx];
+    const wind = Math.round(daily.wind_speed_10m_max[idx]);
+    const temp = Math.round(daily.temperature_2m_max[idx]);
+    if (rain >= 60) return `${rain}% rain likely — fingers crossed 🤞`;
+    if (wind >= 30) return `${wind}km/h wind — tricky conditions`;
+    if (rain >= 30) return `${temp}°C, ${rain}% rain chance — should be OK`;
+    return `${temp}°C, light wind ${wind}km/h — looks great! ☀️`;
+  } catch { return null; }
+}
+
+function showVoteShareToast(player, vote, dateStr) {
+  // Remove existing toast if any
+  const existing = document.getElementById('vote-toast');
+  if (existing) existing.remove();
+
+  const msg = buildVoteShareMessage(player, vote, dateStr);
+  const toast = document.createElement('div');
+  toast.id = 'vote-toast';
+  toast.className = 'vote-share-toast';
+  const voteLabel = vote === 'in' ? '✅ In' : vote === 'maybe' ? '❓ Maybe' : '❌ Out';
+  toast.innerHTML = `
+    <div class="toast-text">
+      <strong>${escapeHtml(player)} voted ${voteLabel}</strong>
+      Share to WhatsApp group?
+    </div>
+    <button class="toast-btn" onclick="shareVoteToWhatsApp(${encodeURIComponent(msg)})">Share</button>
+    <button class="toast-close" onclick="document.getElementById('vote-toast')?.remove()">✕</button>`;
+  document.body.appendChild(toast);
+
+  // Auto-dismiss after 8 seconds
+  setTimeout(() => { document.getElementById('vote-toast')?.remove(); }, 8000);
+}
+
+function shareVoteToWhatsApp(encodedMsg) {
+  const msg = decodeURIComponent(encodedMsg);
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+  document.getElementById('vote-toast')?.remove();
+}
+
+
   const modal = document.getElementById('share-modal');
   document.getElementById('share-whatsapp').addEventListener('click', () => {
     const text = document.getElementById('share-text').value;
@@ -1305,6 +1655,7 @@ function recordVote(player, vote) {
     delete state.availability[coordinatorDate][player];
   } else {
     state.availability[coordinatorDate][player] = vote;
+    showVoteShareToast(player, vote, coordinatorDate);
   }
   saveState();
 }
@@ -1510,6 +1861,11 @@ function renderAll() {
 
 setupTabs();
 setupShareModal();
+setupVoiceEntry();
+setupApiKeyModal();
+window.applyParsedResult = applyParsedResult;
+window.retryVoice = retryVoice;
+window.shareVoteToWhatsApp = shareVoteToWhatsApp;
 setupPhotoTab();
 document.getElementById('save-match').addEventListener('click', saveMatch);
 document.getElementById('save-players').addEventListener('click', savePlayers);
