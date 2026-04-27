@@ -46,6 +46,25 @@
   </section>
 
   <section id="panel-log" class="panel hidden">
+
+    <!-- Voice entry card -->
+    <div class="card voice-card">
+      <div class="voice-header">
+        <div>
+          <div class="voice-title">🎙️ Voice entry</div>
+          <div class="voice-sub">Speak the match naturally — Claude will parse it</div>
+        </div>
+        <button id="voice-btn" class="voice-btn" title="Tap to speak">🎤</button>
+      </div>
+      <div id="voice-transcript" class="voice-transcript hidden"></div>
+      <div id="voice-parsed" class="voice-parsed hidden"></div>
+      <div id="voice-error" class="error hidden"></div>
+      <div class="voice-examples">
+        Try: <em>"Gaurav Manuj vs Chirag Vivek 6-3, 6-4"</em> or <em>"We beat them six three"</em>
+      </div>
+    </div>
+
+    <!-- Manual entry card -->
     <div class="card">
       <div class="form-grid-2">
         <div>
@@ -146,6 +165,33 @@
       <button id="share-whatsapp" class="btn-primary">Open WhatsApp</button>
       <button id="share-copy" class="btn-small">Copy text</button>
       <button id="share-dismiss" class="btn-small">Skip</button>
+    </div>
+  </div>
+</div>
+
+<div id="vote-share-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Share your vote 📣</h3>
+    <p>Let the group know you've voted!</p>
+    <textarea id="vote-share-text" rows="7"></textarea>
+    <div class="modal-actions">
+      <button id="vote-share-whatsapp" class="btn-primary">Open WhatsApp</button>
+      <button id="vote-share-copy" class="btn-small">Copy</button>
+      <button id="vote-share-dismiss" class="btn-small">Skip</button>
+    </div>
+  </div>
+</div>
+
+<div id="apikey-modal" class="modal hidden">
+  <div class="modal-content">
+    <h3>🎙️ Anthropic API key needed</h3>
+    <p>Voice parsing uses Claude AI. Enter your Anthropic API key once — stored only in this browser, never sent anywhere except Anthropic.</p>
+    <label>API key</label>
+    <input type="password" id="apikey-input" placeholder="sk-ant-...">
+    <div style="font-size:12px;color:var(--text-muted);margin-top:6px">Get a free key at <strong>console.anthropic.com</strong> · Set a $1/month spend limit for safety</div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button id="apikey-save" class="btn-primary" style="width:auto;flex:1;margin-top:0">Save & parse</button>
+      <button id="apikey-cancel" class="btn-small">Cancel</button>
     </div>
   </div>
 </div>
