@@ -1996,12 +1996,30 @@ let tickerCache = { messages: [], date: '', filter: '' };
 
 function buildTickerContext() {
   const today = new Date().toISOString().slice(0, 10);
-  const todayMatches = state.matches.filter(m => m.date === today);
-  const allMatches = filteredMatches();
-  const eloData = computeElo();
-  const stats = statsFor(allMatches);
+  const allMatches = sortedMatches(); // all matches regardless of filter
+  const todayMatches = allMatches.filter(m => m.date === today);
 
-  // Today's star — most wins today
+  // Compute ELO and stats directly from all matches
+  const eloData = computeElo();
+  const playerStats = {};
+  state.players.forEach(p => {
+    playerStats[p] = { wins: 0, losses: 0, matches: 0 };
+  });
+  allMatches.forEach(m => {
+    const aWin = m.winner === 'A';
+    m.teamA.forEach(p => {
+      if (!playerStats[p]) return;
+      playerStats[p].matches++;
+      aWin ? playerStats[p].wins++ : playerStats[p].losses++;
+    });
+    m.teamB.forEach(p => {
+      if (!playerStats[p]) return;
+      playerStats[p].matches++;
+      aWin ? playerStats[p].losses++ : playerStats[p].wins++;
+    });
+  });
+
+  // Today's star
   const todayStats = {};
   state.players.forEach(p => { todayStats[p] = { w: 0, l: 0 }; });
   todayMatches.forEach(m => {
@@ -2013,10 +2031,13 @@ function buildTickerContext() {
     .filter(p => todayStats[p].w > 0)
     .sort((a, b) => todayStats[b].w - todayStats[a].w)[0] || null;
 
-  const eloLeader = [...state.players].sort((a, b) => eloData.current[b] - eloData.current[a])[0];
+  const eloLeader = [...state.players]
+    .sort((a, b) => (eloData.current[b] || 1200) - (eloData.current[a] || 1200))[0];
+
   const mostLosses = [...state.players]
-    .filter(p => stats[p].matches > 0)
-    .sort((a, b) => b.losses - a.losses)[0];
+    .filter(p => playerStats[p].matches > 0)
+    .sort((a, b) => playerStats[b].losses - playerStats[a].losses)[0];
+
   const biggestUpset = allMatches.reduce((best, m) => {
     const teamAvg = (team) => team.reduce((s, p) => s + (eloData.current[p] || 1200), 0) / team.length;
     const eloA = teamAvg(m.teamA), eloB = teamAvg(m.teamB);
@@ -2024,7 +2045,7 @@ function buildTickerContext() {
     return gap > (best?.gap || 0) ? { match: m, gap } : best;
   }, null);
 
-  const context = {
+  return {
     todayStar,
     todayMatches: todayMatches.length,
     todayScores: todayMatches.map(m => {
@@ -2032,33 +2053,30 @@ function buildTickerContext() {
       return `${m.teamA.join('&')} ${aWin ? 'beat' : 'lost to'} ${m.teamB.join('&')} ${m.sets.map(s => `${s.a}-${s.b}`).join(',')}`;
     }),
     eloLeader,
-    eloLeaderRating: eloData.current[eloLeader],
+    eloLeaderRating: eloData.current[eloLeader] || 1200,
     mostLosses,
-    mostLossesCount: mostLosses ? stats[mostLosses].losses : 0,
+    mostLossesCount: mostLosses ? playerStats[mostLosses].losses : 0,
     biggestUpsetWinners: biggestUpset ? (biggestUpset.match.winner === 'A' ? biggestUpset.match.teamA : biggestUpset.match.teamB) : null,
     biggestUpsetScore: biggestUpset ? biggestUpset.match.sets.map(s => `${s.a}-${s.b}`).join(',') : null,
     totalMatches: allMatches.length,
     players: state.players,
     winRates: state.players.map(p => ({
       name: p,
-      wins: stats[p].wins,
-      losses: stats[p].losses,
-      elo: eloData.current[p]
+      wins: playerStats[p].wins,
+      losses: playerStats[p].losses,
+      elo: eloData.current[p] || 1200
     }))
   };
-  return context;
 }
 
 async function generateTicker(force = false) {
   const key = getApiKey();
-  if (!key) return; // no key — skip silently
+  if (!key) { hideTickerWrap(); return; }
 
   const today = new Date().toISOString().slice(0, 10);
-  const todayMatches = state.matches.filter(m => m.date === today);
-  const allMatches = filteredMatches();
+  const allMatches = sortedMatches();
 
-  // Need at least 1 match to generate commentary
-  if (allMatches.length === 0) return;
+  if (allMatches.length === 0) { hideTickerWrap(); return; }
 
   // Use cache if same day, same filter, not forced
   if (!force && tickerCache.messages.length > 0 &&
@@ -2074,25 +2092,24 @@ async function generateTicker(force = false) {
   const prompt = `You are a witty, funny sports commentator for a weekend doubles tennis group. Generate EXACTLY 5 short ticker messages based on these match stats. Be funny, sarcastic, encouraging, use tennis puns, roast the losers gently, celebrate winners. Use player names specifically. Each message should be different in tone — mix of praise, gentle roasting, motivation, fun facts, and predictions.
 
 Player data:
-${ctx.winRates.map(p => `${p.name}: ${p.wins}W-${p.losses}L, ELO ${p.elo}`).join(', ')}
+${ctx.winRates.filter(p => p.wins + p.losses > 0).map(p => `${p.name}: ${p.wins}W-${p.losses}L, ELO ${p.elo}`).join(', ')}
 
-Today's matches (${ctx.todayMatches} played): ${ctx.todayScores.join(' | ') || 'none today'}
-
-Today's star: ${ctx.todayStar || 'nobody yet'}
-ELO leader overall: ${ctx.eloLeader} (${ctx.eloLeaderRating})
-Most losses: ${ctx.mostLosses} (${ctx.mostLossesCount} losses)
-${ctx.biggestUpsetWinners ? `Biggest upset: ${ctx.biggestUpsetWinners.join('&')} won ${ctx.biggestUpsetScore}` : ''}
-Total matches played: ${ctx.totalMatches}
+Today's matches (${ctx.todayMatches} played): ${ctx.todayScores.join(' | ') || 'none today yet'}
+Today's star: ${ctx.todayStar || 'nobody yet today'}
+ELO leader: ${ctx.eloLeader} (${ctx.eloLeaderRating})
+Most losses overall: ${ctx.mostLosses || 'N/A'} (${ctx.mostLossesCount})
+${ctx.biggestUpsetWinners ? `Biggest upset ever: ${ctx.biggestUpsetWinners.join(' & ')} won ${ctx.biggestUpsetScore}` : ''}
+Total matches played all time: ${ctx.totalMatches}
 
 Rules:
 - Each message max 12 words
 - Include trophy 🏆 next to today's star player name in at least one message
 - Use emojis liberally — 🎾 😂 🔥 💪 😬 👑 📉 🚀
-- Be creative, funny and specific to these players
-- Vary the tone: celebration, roast, motivation, prediction, fun stat
-- Never be mean-spirited, keep it playful
+- Be creative and funny, specific to these players and their stats
+- Vary tone: celebration, gentle roast, motivation, prediction, fun stat
+- Keep it playful, never mean-spirited
 
-Respond ONLY with a JSON array of exactly 5 strings, no explanation:
+Respond ONLY with a JSON array of exactly 5 strings, no explanation, no markdown:
 ["message1", "message2", "message3", "message4", "message5"]`;
 
   try {
@@ -2106,20 +2123,33 @@ Respond ONLY with a JSON array of exactly 5 strings, no explanation:
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 300,
+        max_tokens: 400,
         messages: [{ role: 'user', content: prompt }]
       })
     });
 
     if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      console.warn('Ticker API error:', res.status, errData);
       hideTickerWrap();
       return;
     }
 
     const data = await res.json();
-    const raw = data.content[0]?.text || '[]';
+    const raw = data.content?.[0]?.text || '';
+    if (!raw) { hideTickerWrap(); return; }
+
+    // Strip any markdown fences and parse
     const cleaned = raw.replace(/```json|```/g, '').trim();
-    const messages = JSON.parse(cleaned);
+    let messages;
+    try {
+      messages = JSON.parse(cleaned);
+    } catch(parseErr) {
+      // If JSON parse fails, try extracting quoted strings
+      const extracted = cleaned.match(/"([^"]+)"/g);
+      messages = extracted ? extracted.map(s => s.replace(/"/g, '')) : null;
+    }
+
     if (!Array.isArray(messages) || messages.length === 0) {
       hideTickerWrap();
       return;
@@ -2129,7 +2159,7 @@ Respond ONLY with a JSON array of exactly 5 strings, no explanation:
     renderTickerMessages(messages);
 
   } catch(e) {
-    console.warn('Ticker generation failed:', e);
+    console.warn('Ticker generation failed:', e.message);
     hideTickerWrap();
   }
 }
