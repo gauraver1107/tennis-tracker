@@ -1990,6 +1990,181 @@ async function deletePhoto(id) {
   await saveState();
 }
 
+// ── AI Ticker ──────────────────────────────────────────────────────────────
+
+let tickerCache = { messages: [], date: '', filter: '' };
+
+function buildTickerContext() {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayMatches = state.matches.filter(m => m.date === today);
+  const allMatches = filteredMatches();
+  const eloData = computeElo();
+  const stats = statsFor(allMatches);
+
+  // Today's star — most wins today
+  const todayStats = {};
+  state.players.forEach(p => { todayStats[p] = { w: 0, l: 0 }; });
+  todayMatches.forEach(m => {
+    const aWin = m.winner === 'A';
+    m.teamA.forEach(p => { if (todayStats[p]) aWin ? todayStats[p].w++ : todayStats[p].l++; });
+    m.teamB.forEach(p => { if (todayStats[p]) aWin ? todayStats[p].l++ : todayStats[p].w++; });
+  });
+  const todayStar = state.players
+    .filter(p => todayStats[p].w > 0)
+    .sort((a, b) => todayStats[b].w - todayStats[a].w)[0] || null;
+
+  const eloLeader = [...state.players].sort((a, b) => eloData.current[b] - eloData.current[a])[0];
+  const mostLosses = [...state.players]
+    .filter(p => stats[p].matches > 0)
+    .sort((a, b) => b.losses - a.losses)[0];
+  const biggestUpset = allMatches.reduce((best, m) => {
+    const teamAvg = (team) => team.reduce((s, p) => s + (eloData.current[p] || 1200), 0) / team.length;
+    const eloA = teamAvg(m.teamA), eloB = teamAvg(m.teamB);
+    const gap = m.winner === 'A' ? eloB - eloA : eloA - eloB;
+    return gap > (best?.gap || 0) ? { match: m, gap } : best;
+  }, null);
+
+  const context = {
+    todayStar,
+    todayMatches: todayMatches.length,
+    todayScores: todayMatches.map(m => {
+      const aWin = m.winner === 'A';
+      return `${m.teamA.join('&')} ${aWin ? 'beat' : 'lost to'} ${m.teamB.join('&')} ${m.sets.map(s => `${s.a}-${s.b}`).join(',')}`;
+    }),
+    eloLeader,
+    eloLeaderRating: eloData.current[eloLeader],
+    mostLosses,
+    mostLossesCount: mostLosses ? stats[mostLosses].losses : 0,
+    biggestUpsetWinners: biggestUpset ? (biggestUpset.match.winner === 'A' ? biggestUpset.match.teamA : biggestUpset.match.teamB) : null,
+    biggestUpsetScore: biggestUpset ? biggestUpset.match.sets.map(s => `${s.a}-${s.b}`).join(',') : null,
+    totalMatches: allMatches.length,
+    players: state.players,
+    winRates: state.players.map(p => ({
+      name: p,
+      wins: stats[p].wins,
+      losses: stats[p].losses,
+      elo: eloData.current[p]
+    }))
+  };
+  return context;
+}
+
+async function generateTicker(force = false) {
+  const key = getApiKey();
+  if (!key) return; // no key — skip silently
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayMatches = state.matches.filter(m => m.date === today);
+  const allMatches = filteredMatches();
+
+  // Need at least 1 match to generate commentary
+  if (allMatches.length === 0) return;
+
+  // Use cache if same day, same filter, not forced
+  if (!force && tickerCache.messages.length > 0 &&
+      tickerCache.date === today && tickerCache.filter === currentFilter) {
+    renderTickerMessages(tickerCache.messages);
+    return;
+  }
+
+  showTickerLoading();
+
+  const ctx = buildTickerContext();
+
+  const prompt = `You are a witty, funny sports commentator for a weekend doubles tennis group. Generate EXACTLY 5 short ticker messages based on these match stats. Be funny, sarcastic, encouraging, use tennis puns, roast the losers gently, celebrate winners. Use player names specifically. Each message should be different in tone — mix of praise, gentle roasting, motivation, fun facts, and predictions.
+
+Player data:
+${ctx.winRates.map(p => `${p.name}: ${p.wins}W-${p.losses}L, ELO ${p.elo}`).join(', ')}
+
+Today's matches (${ctx.todayMatches} played): ${ctx.todayScores.join(' | ') || 'none today'}
+
+Today's star: ${ctx.todayStar || 'nobody yet'}
+ELO leader overall: ${ctx.eloLeader} (${ctx.eloLeaderRating})
+Most losses: ${ctx.mostLosses} (${ctx.mostLossesCount} losses)
+${ctx.biggestUpsetWinners ? `Biggest upset: ${ctx.biggestUpsetWinners.join('&')} won ${ctx.biggestUpsetScore}` : ''}
+Total matches played: ${ctx.totalMatches}
+
+Rules:
+- Each message max 12 words
+- Include trophy 🏆 next to today's star player name in at least one message
+- Use emojis liberally — 🎾 😂 🔥 💪 😬 👑 📉 🚀
+- Be creative, funny and specific to these players
+- Vary the tone: celebration, roast, motivation, prediction, fun stat
+- Never be mean-spirited, keep it playful
+
+Respond ONLY with a JSON array of exactly 5 strings, no explanation:
+["message1", "message2", "message3", "message4", "message5"]`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      hideTickerWrap();
+      return;
+    }
+
+    const data = await res.json();
+    const raw = data.content[0]?.text || '[]';
+    const cleaned = raw.replace(/```json|```/g, '').trim();
+    const messages = JSON.parse(cleaned);
+    if (!Array.isArray(messages) || messages.length === 0) {
+      hideTickerWrap();
+      return;
+    }
+
+    tickerCache = { messages, date: today, filter: currentFilter };
+    renderTickerMessages(messages);
+
+  } catch(e) {
+    console.warn('Ticker generation failed:', e);
+    hideTickerWrap();
+  }
+}
+
+function renderTickerMessages(messages) {
+  const wrap = document.getElementById('ai-ticker-wrap');
+  const ticker = document.getElementById('ai-ticker');
+  if (!wrap || !ticker) return;
+
+  // Build scrolling content — messages separated by 🎾
+  ticker.innerHTML = messages.map((msg, i) =>
+    `<span>${escapeHtml(msg)}</span>${i < messages.length - 1 ? '<span class="ticker-sep">🎾</span>' : ''}`
+  ).join('');
+
+  // Restart animation by re-adding the element
+  ticker.style.animation = 'none';
+  ticker.offsetHeight; // force reflow
+  ticker.style.animation = '';
+
+  wrap.classList.remove('hidden');
+}
+
+function showTickerLoading() {
+  const wrap = document.getElementById('ai-ticker-wrap');
+  const ticker = document.getElementById('ai-ticker');
+  if (!wrap || !ticker) return;
+  ticker.innerHTML = '<span class="ticker-loading">🤖 Claude is cooking up today\'s commentary…</span>';
+  wrap.classList.remove('hidden');
+}
+
+function hideTickerWrap() {
+  const wrap = document.getElementById('ai-ticker-wrap');
+  if (wrap) wrap.classList.add('hidden');
+}
+
 function renderAll() {
   renderFilter();
   renderWeekendCoordinator();
@@ -2002,6 +2177,7 @@ function renderAll() {
   renderLogForm();
   renderCharts();
   renderPhotosPanel();
+  generateTicker(); // generate after data loads
 }
 
 setupTabs();
@@ -2013,6 +2189,7 @@ window.retryVoice = retryVoice;
 window.shareVoteToWhatsApp = shareVoteToWhatsApp;
 setupPhotoTab();
 document.getElementById('save-match')?.addEventListener('click', saveMatch);
+document.getElementById('ticker-refresh')?.addEventListener('click', () => generateTicker(true));
 document.getElementById('save-players')?.addEventListener('click', savePlayers);
 document.getElementById('reset-all')?.addEventListener('click', resetAll);
 document.getElementById('export-csv')?.addEventListener('click', exportCsv);
@@ -2020,7 +2197,9 @@ document.getElementById('reshuffle')?.addEventListener('click', renderRotation);
 document.getElementById('save-location')?.addEventListener('click', saveLocation);
 document.getElementById('filter-weekend')?.addEventListener('change', (e) => {
   currentFilter = e.target.value;
+  tickerCache = { messages: [], date: '', filter: '' }; // invalidate cache
   renderSummary();
   renderChampion();
   renderLeaderboard();
+  generateTicker();
 });
