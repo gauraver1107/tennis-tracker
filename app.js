@@ -735,6 +735,10 @@ function saveMatch() {
   renderSetsInputs();
   updateSittingOut();
   openShareModal(match);
+  // Regenerate ticker with new match data after a short delay
+  tickerCache = { messages: [], date: '', filter: '' };
+  tickerGenerated = false;
+  setTimeout(() => generateTicker(true), 500);
 }
 
 function showErr(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
@@ -2198,6 +2202,8 @@ function hideTickerWrap() {
   if (wrap) wrap.classList.add('hidden');
 }
 
+let tickerGenerated = false;
+
 function renderAll() {
   renderFilter();
   renderWeekendCoordinator();
@@ -2210,7 +2216,11 @@ function renderAll() {
   renderLogForm();
   renderCharts();
   renderPhotosPanel();
-  generateTicker(); // generate after data loads
+  // Defer ticker so dashboard renders first — only generate once on load
+  if (!tickerGenerated) {
+    tickerGenerated = true;
+    setTimeout(() => generateTicker(), 100);
+  }
 }
 
 setupTabs();
@@ -2222,7 +2232,10 @@ window.retryVoice = retryVoice;
 window.shareVoteToWhatsApp = shareVoteToWhatsApp;
 setupPhotoTab();
 document.getElementById('save-match')?.addEventListener('click', saveMatch);
-document.getElementById('ticker-refresh')?.addEventListener('click', () => generateTicker(true));
+document.getElementById('ticker-refresh')?.addEventListener('click', () => {
+  tickerGenerated = false;
+  generateTicker(true);
+});
 document.getElementById('save-players')?.addEventListener('click', savePlayers);
 document.getElementById('reset-all')?.addEventListener('click', resetAll);
 document.getElementById('export-csv')?.addEventListener('click', exportCsv);
@@ -2230,9 +2243,10 @@ document.getElementById('reshuffle')?.addEventListener('click', renderRotation);
 document.getElementById('save-location')?.addEventListener('click', saveLocation);
 document.getElementById('filter-weekend')?.addEventListener('change', (e) => {
   currentFilter = e.target.value;
-  tickerCache = { messages: [], date: '', filter: '' }; // invalidate cache
+  tickerCache = { messages: [], date: '', filter: '' };
+  tickerGenerated = false;
   renderSummary();
   renderChampion();
   renderLeaderboard();
-  generateTicker();
+  setTimeout(() => generateTicker(), 100);
 });
