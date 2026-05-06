@@ -27,6 +27,13 @@
 <main>
 
   <section id="panel-dashboard" class="panel">
+    <div id="ai-ticker-wrap" class="ticker-wrap hidden">
+      <div class="ticker-label">🤖 Claude says</div>
+      <div class="ticker-track">
+        <div class="ticker-content" id="ai-ticker"></div>
+      </div>
+      <button id="ticker-refresh" class="ticker-refresh" title="Generate new messages">↺</button>
+    </div>
     <div class="controls-row">
       <label>View</label>
       <select id="filter-weekend"></select>
