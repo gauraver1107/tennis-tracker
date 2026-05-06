@@ -193,6 +193,10 @@ button:active { transform: scale(0.98); }
   position: relative;
   height: 22px;
 }
+@keyframes tickerScroll {
+  0%   { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
 .ticker-content {
   display: inline-flex;
   align-items: center;
@@ -201,14 +205,10 @@ button:active { transform: scale(0.98); }
   color: white;
   font-size: 13px;
   font-weight: 500;
-  animation: tickerScroll 28s linear infinite;
+  animation: tickerScroll 45s linear infinite;
   position: absolute;
 }
 .ticker-content:hover { animation-play-state: paused; }
-@keyframes tickerScroll {
-  0%   { transform: translateX(100%); }
-  100% { transform: translateX(-100%); }
-}
 .ticker-sep {
   margin: 0 20px;
   opacity: 0.5;
