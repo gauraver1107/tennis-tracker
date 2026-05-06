@@ -187,15 +187,6 @@ button:active { transform: scale(0.98); }
   position: relative;
 }
 .ticker-wrap.hidden { display: none; }
-.ticker-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.85);
-  white-space: nowrap;
-  flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
 .ticker-track {
   flex: 1;
   overflow: hidden;
