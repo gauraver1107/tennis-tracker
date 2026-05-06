@@ -2089,7 +2089,7 @@ async function generateTicker(force = false) {
 
   const ctx = buildTickerContext();
 
-  const prompt = `You are a witty, funny sports commentator for a weekend doubles tennis group. Generate EXACTLY 5 short ticker messages based on these match stats. Be funny, sarcastic, encouraging, use tennis puns, roast the losers gently, celebrate winners. Use player names specifically. Each message should be different in tone — mix of praise, gentle roasting, motivation, fun facts, and predictions.
+  const prompt = `You are a witty, funny sports commentator for a weekend doubles tennis group. Generate EXACTLY 3 short ticker messages based on these match stats. Be funny, sarcastic, encouraging, use tennis puns, roast the losers gently, celebrate winners. Use player names specifically. Each message should be different in tone.
 
 Player data:
 ${ctx.winRates.filter(p => p.wins + p.losses > 0).map(p => `${p.name}: ${p.wins}W-${p.losses}L, ELO ${p.elo}`).join(', ')}
@@ -2104,13 +2104,13 @@ Total matches played all time: ${ctx.totalMatches}
 Rules:
 - Each message max 12 words
 - Include trophy 🏆 next to today's star player name in at least one message
-- Use emojis liberally — 🎾 😂 🔥 💪 😬 👑 📉 🚀
+- Use emojis — 🎾 😂 🔥 💪 😬 👑 📉 🚀
 - Be creative and funny, specific to these players and their stats
-- Vary tone: celebration, gentle roast, motivation, prediction, fun stat
+- Vary tone: one celebration, one gentle roast, one motivation or prediction
 - Keep it playful, never mean-spirited
 
-Respond ONLY with a JSON array of exactly 5 strings, no explanation, no markdown:
-["message1", "message2", "message3", "message4", "message5"]`;
+Respond ONLY with a JSON array of exactly 3 strings, no explanation, no markdown:
+["message1", "message2", "message3"]`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -2123,7 +2123,7 @@ Respond ONLY with a JSON array of exactly 5 strings, no explanation, no markdown
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 400,
+        max_tokens: 200,
         messages: [{ role: 'user', content: prompt }]
       })
     });
