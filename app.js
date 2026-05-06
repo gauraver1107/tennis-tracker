@@ -2131,12 +2131,15 @@ Respond ONLY with a JSON array of exactly 5 strings, no explanation, no markdown
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       console.warn('Ticker API error:', res.status, errData);
-      hideTickerWrap();
+      const errMsg = errData?.error?.message || `API error ${res.status}`;
+      // Show error in ticker so user can see what's wrong
+      renderTickerMessages([`⚠️ ${errMsg}`]);
       return;
     }
 
     const data = await res.json();
     const raw = data.content?.[0]?.text || '';
+    console.log('Ticker raw response:', raw); // debug
     if (!raw) { hideTickerWrap(); return; }
 
     // Strip any markdown fences and parse
@@ -2160,7 +2163,7 @@ Respond ONLY with a JSON array of exactly 5 strings, no explanation, no markdown
 
   } catch(e) {
     console.warn('Ticker generation failed:', e.message);
-    hideTickerWrap();
+    renderTickerMessages([`⚠️ Ticker error: ${e.message} — check console`]);
   }
 }
 
@@ -2186,7 +2189,7 @@ function showTickerLoading() {
   const wrap = document.getElementById('ai-ticker-wrap');
   const ticker = document.getElementById('ai-ticker');
   if (!wrap || !ticker) return;
-  ticker.innerHTML = '<span class="ticker-loading">🤖 Claude is cooking up today\'s commentary…</span>';
+  ticker.innerHTML = '<span style="color:rgba(255,255,255,0.75);font-style:italic">🎾 Generating match commentary…</span>';
   wrap.classList.remove('hidden');
 }
 
