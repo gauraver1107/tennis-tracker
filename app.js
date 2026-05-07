@@ -2098,38 +2098,42 @@ async function generateTicker(force = false) {
 
   const ctx = buildTickerContext();
 
-  const prompt = `You are a witty sports commentator for a weekend doubles tennis group. Generate EXACTLY 3 ticker messages. Message 1 and 2 in English, Message 3 in Hindi Haryanvi script.
+  const prompt = `You are an uplifting, motivational sports commentator for a weekend doubles tennis group. Generate EXACTLY 3 ticker messages based on actual player performance. Messages 1 and 2 in English, Message 3 in Devanagari Hindi Haryanvi.
 
 Player stats:
 ${ctx.winRates.filter(p => p.wins + p.losses > 0).map(p => `${p.name}: ${p.wins}W-${p.losses}L, ELO ${p.elo}`).join(', ')}
 
 Today (${ctx.todayMatches} matches): ${ctx.todayScores.join(' | ') || 'none today yet'}
-Today star: ${ctx.todayStar || 'none yet'} | ELO leader: ${ctx.eloLeader} (${ctx.eloLeaderRating}) | Total matches: ${ctx.totalMatches}
+Today star: ${ctx.todayStar || 'none yet'} | ELO leader: ${ctx.eloLeader} (${ctx.eloLeaderRating}) | Total: ${ctx.totalMatches} matches
 ${ctx.biggestUpsetWinners ? `Biggest upset: ${ctx.biggestUpsetWinners.join(' & ')} won ${ctx.biggestUpsetScore}` : ''}
 
 ENGLISH RULES (messages 1-2):
 - Max 12 words each
-- Funny and witty, never insulting to any individual
-- Comment on the game energy, partnerships, streaks — not personal failures
-- Use emojis 🎾 😂 🔥 💪 👑 🚀
-- Include 🏆 for today's star if there is one
+- Motivational and personal — mention specific player names based on their performance
+- Message 1: celebrate today's best performer or a notable achievement with their name
+- Message 2: motivate someone who is still climbing — encourage them by name, never negative
+- Always uplifting — "X is finding their rhythm!", "Watch out for Y!", "Z's time is coming!"
+- Use emojis 🎾 😄 🔥 💪 👑 🚀 ⭐
+- Include 🏆 next to today's star's name
 
-HARYANVI RULES (message 3 — write in Hindi Devanagari script):
-- Use authentic Haryanvi words: म्हारे, थारा/थारे, सै, ल्यावो, चाल के, खेल्या, यो ई, रहवै, आणा, मारियो, सुण रह्या, बेरा, धाकड़, भाई
-- Examples of tone:
-  "म्हारे court पे आज धमाल मचा दिया — एकदम नंबर एक सै भाई!"
-  "यो जोड़ी तो भाई जमती सै — आगे चाल के trophy पक्की सै!"
-  "हार जीत तो चालती रहवै — मजा आणा चाहिए बस भाई!"
-  "म्हारे group का जोश देख के दिल खुश हो गया — धाकड़ सै!"
-  "अगली बार और जोर तें मारियो भाई — court सुण रह्या सै!"
-  "Weekend हो और tennis ना हो — यो तो पाप सै म्हारे यार!"
-  "आज तो इतने match खेले के racket नें भी बोल दिया — वाह भाई!"
-  "भाई इस court का शेर सै यो — म्हारे खिलाड़ी कमाल सै!"
-- Must be warm, funny, team-spirited — never insult any individual
-- Max 15 Hindi words
+HARYANVI HINDI RULES (message 3 — must be in Devanagari script):
+- Warm, celebratory, motivational — NEVER negative or demotivating
+- Can include a player's name if they played well today — celebrate them warmly
+- Use Haryanvi words: कति, धमाल, घैंत, जोड़ी, दबदबा, कसुट्टा, हिम्मत, धाकड़, माहौल, स्वैग, असली, पावर
+- Vary endings each time: "कति घैंत!", "वाह भाई वाह!", "धाकड़ खेल!", "कमाल कर दिया!", "असली Haryana power!"
+- Choose and adapt based on context:
+  If someone played great: "आज [NAME] ने court पे कति धमाल मचा दिया — कति घैंत! 🏆"
+  If great partnership: "जोड़ी ने match में पूरी Haryanvi छाप छोड़ दी — कसुट्टा खेल!"
+  If good session: "आज court पे असली Haryana power देखने को मिली — वाह भाई वाह!"
+  If comeback: "Match tight था, पर अपनी जोड़ी ने हिम्मत ना छोड़ी — धाकड़ खेल!"
+  If dominant win: "शुरू से end तक team का दबदबा बना रहा — कमाल कर दिया!"
+  If everyone played: "Court पे आये, खेले, और जीत ले गये — असली Haryana power!"
+  If motivating: "आज का game full कसुट्टा था — अगली बार और धमाल होगा!"
+  General energy: "Team ने patience रखा और result अपने नाम करा — घैंत खेल!"
+- Max 15 words. Always ends with a positive exclamation.
 
-Respond ONLY with JSON array of exactly 3 strings:
-["english msg 1", "english msg 2", "हरियाणवी msg 3"]`;
+Respond ONLY with JSON array of exactly 3 strings, no explanation, no markdown:
+["english msg 1", "english msg 2", "देवनागरी हरियाणवी msg 3"]`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
