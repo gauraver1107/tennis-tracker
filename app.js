@@ -22,6 +22,8 @@ let trendChart = null, eloChart = null, weatherChart = null;
 let currentFilter = 'all';
 let isSyncing = false;
 let weatherCache = { data: null, fetchedAt: 0, location: null };
+let tickerCache = { messages: [], date: '', filter: '' };
+let tickerGenerated = false;
 
 function setStatus(text, cls) {
   const el = document.getElementById('sync-status');
@@ -50,6 +52,11 @@ onSnapshot(DOC_REF, (snap) => {
     if (m.notes === undefined) m.notes = '';
   });
   setStatus('Synced', 'online');
+  // Start ticker API call immediately on first sync — runs in parallel with renderAll
+  if (!tickerGenerated && state.matches.length > 0 && state.apiKey) {
+    tickerGenerated = true;
+    generateTicker();
+  }
   renderAll();
 }, (err) => {
   console.error('Sync error:', err);
@@ -1996,8 +2003,6 @@ async function deletePhoto(id) {
 
 // ── AI Ticker ──────────────────────────────────────────────────────────────
 
-let tickerCache = { messages: [], date: '', filter: '' };
-
 function buildTickerContext() {
   const today = new Date().toISOString().slice(0, 10);
   const allMatches = sortedMatches(); // all matches regardless of filter
@@ -2093,28 +2098,38 @@ async function generateTicker(force = false) {
 
   const ctx = buildTickerContext();
 
-  const prompt = `You are a witty, funny sports commentator for a weekend doubles tennis group. Generate EXACTLY 3 short ticker messages based on these match stats. Be funny, sarcastic, encouraging, use tennis puns, roast the losers gently, celebrate winners. Use player names specifically. Each message should be different in tone.
+  const prompt = `You are a witty sports commentator for a weekend doubles tennis group. Generate EXACTLY 3 ticker messages. Message 1 and 2 in English, Message 3 in Hindi Haryanvi script.
 
-Player data:
+Player stats:
 ${ctx.winRates.filter(p => p.wins + p.losses > 0).map(p => `${p.name}: ${p.wins}W-${p.losses}L, ELO ${p.elo}`).join(', ')}
 
-Today's matches (${ctx.todayMatches} played): ${ctx.todayScores.join(' | ') || 'none today yet'}
-Today's star: ${ctx.todayStar || 'nobody yet today'}
-ELO leader: ${ctx.eloLeader} (${ctx.eloLeaderRating})
-Most losses overall: ${ctx.mostLosses || 'N/A'} (${ctx.mostLossesCount})
-${ctx.biggestUpsetWinners ? `Biggest upset ever: ${ctx.biggestUpsetWinners.join(' & ')} won ${ctx.biggestUpsetScore}` : ''}
-Total matches played all time: ${ctx.totalMatches}
+Today (${ctx.todayMatches} matches): ${ctx.todayScores.join(' | ') || 'none today yet'}
+Today star: ${ctx.todayStar || 'none yet'} | ELO leader: ${ctx.eloLeader} (${ctx.eloLeaderRating}) | Total matches: ${ctx.totalMatches}
+${ctx.biggestUpsetWinners ? `Biggest upset: ${ctx.biggestUpsetWinners.join(' & ')} won ${ctx.biggestUpsetScore}` : ''}
 
-Rules:
-- Each message max 12 words
-- Include trophy 🏆 next to today's star player name in at least one message
-- Use emojis — 🎾 😂 🔥 💪 😬 👑 📉 🚀
-- Be creative and funny, specific to these players and their stats
-- Vary tone: one celebration, one gentle roast, one motivation or prediction
-- Keep it playful, never mean-spirited
+ENGLISH RULES (messages 1-2):
+- Max 12 words each
+- Funny and witty, never insulting to any individual
+- Comment on the game energy, partnerships, streaks — not personal failures
+- Use emojis 🎾 😂 🔥 💪 👑 🚀
+- Include 🏆 for today's star if there is one
 
-Respond ONLY with a JSON array of exactly 3 strings, no explanation, no markdown:
-["message1", "message2", "message3"]`;
+HARYANVI RULES (message 3 — write in Hindi Devanagari script):
+- Use authentic Haryanvi words: म्हारे, थारा/थारे, सै, ल्यावो, चाल के, खेल्या, यो ई, रहवै, आणा, मारियो, सुण रह्या, बेरा, धाकड़, भाई
+- Examples of tone:
+  "म्हारे court पे आज धमाल मचा दिया — एकदम नंबर एक सै भाई!"
+  "यो जोड़ी तो भाई जमती सै — आगे चाल के trophy पक्की सै!"
+  "हार जीत तो चालती रहवै — मजा आणा चाहिए बस भाई!"
+  "म्हारे group का जोश देख के दिल खुश हो गया — धाकड़ सै!"
+  "अगली बार और जोर तें मारियो भाई — court सुण रह्या सै!"
+  "Weekend हो और tennis ना हो — यो तो पाप सै म्हारे यार!"
+  "आज तो इतने match खेले के racket नें भी बोल दिया — वाह भाई!"
+  "भाई इस court का शेर सै यो — म्हारे खिलाड़ी कमाल सै!"
+- Must be warm, funny, team-spirited — never insult any individual
+- Max 15 Hindi words
+
+Respond ONLY with JSON array of exactly 3 strings:
+["english msg 1", "english msg 2", "हरियाणवी msg 3"]`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -2202,8 +2217,6 @@ function hideTickerWrap() {
   if (wrap) wrap.classList.add('hidden');
 }
 
-let tickerGenerated = false;
-
 function renderAll() {
   renderFilter();
   renderWeekendCoordinator();
@@ -2216,11 +2229,6 @@ function renderAll() {
   renderLogForm();
   renderCharts();
   renderPhotosPanel();
-  // Defer ticker so dashboard renders first — only generate once on load
-  if (!tickerGenerated) {
-    tickerGenerated = true;
-    setTimeout(() => generateTicker(), 100);
-  }
 }
 
 setupTabs();
