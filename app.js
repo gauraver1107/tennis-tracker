@@ -17,13 +17,14 @@ const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang'];
 const ELO_START = 1200;
 const ELO_K = 32;
 
-let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '' };
+let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '', eloCarryover: {} };
 let trendChart = null, eloChart = null, weatherChart = null;
 let currentFilter = 'all';
 let isSyncing = false;
 let weatherCache = { data: null, fetchedAt: 0, location: null };
 let tickerCache = { messages: [], date: '', filter: '' };
 let tickerGenerated = false;
+let lastKnownMatchCount = 0; // safety guard — tracks highest match count seen
 
 function setStatus(text, cls) {
   const el = document.getElementById('sync-status');
@@ -34,15 +35,32 @@ function setStatus(text, cls) {
 onSnapshot(DOC_REF, (snap) => {
   if (snap.exists()) {
     const data = snap.data();
+    const incomingMatches = data.matches || [];
+    // Safety — never accept empty matches if we already have data loaded
+    if (incomingMatches.length === 0 && lastKnownMatchCount > 0) {
+      console.warn('onSnapshot: ignoring empty matches — keeping', lastKnownMatchCount, 'existing matches');
+      setStatus('Synced', 'online');
+      return;
+    }
     state = {
       players: data.players || [...DEFAULT_PLAYERS],
-      matches: data.matches || [],
+      matches: incomingMatches,
       location: data.location || null,
       availability: data.availability || {},
       photos: data.photos || [],
-      apiKey: data.apiKey || ''
+      apiKey: data.apiKey || '',
+      eloCarryover: data.eloCarryover || {}
     };
+    if (incomingMatches.length > lastKnownMatchCount) {
+      lastKnownMatchCount = incomingMatches.length;
+    }
   } else {
+    // Document doesn't exist yet — don't overwrite state if we already have matches
+    if (lastKnownMatchCount > 0) {
+      console.warn('onSnapshot: document missing but we have local data — not resetting');
+      setStatus('Synced', 'online');
+      return;
+    }
     state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [], apiKey: '' };
   }
   if (state.players.length < 5) state.players = [...DEFAULT_PLAYERS];
@@ -52,7 +70,6 @@ onSnapshot(DOC_REF, (snap) => {
     if (m.notes === undefined) m.notes = '';
   });
   setStatus('Synced', 'online');
-  // Start ticker API call immediately on first sync — runs in parallel with renderAll
   if (!tickerGenerated && state.matches.length > 0 && state.apiKey) {
     tickerGenerated = true;
     generateTicker();
@@ -65,10 +82,17 @@ onSnapshot(DOC_REF, (snap) => {
 
 async function saveState() {
   if (isSyncing) return;
+  // Safety guard — never write empty matches array if we know we had data
+  if (state.matches.length === 0 && lastKnownMatchCount > 0) {
+    console.warn('saveState blocked — would overwrite', lastKnownMatchCount, 'matches with empty array');
+    setStatus('Save blocked — data safety', 'offline');
+    return;
+  }
   isSyncing = true;
   setStatus('Saving…', '');
   try {
     await setDoc(DOC_REF, state);
+    lastKnownMatchCount = state.matches.length;
     setStatus('Synced', 'online');
   } catch (e) {
     console.error(e);
@@ -107,9 +131,10 @@ function filteredMatches() {
 
 function computeElo() {
   const elo = {};
-  state.players.forEach(p => { elo[p] = ELO_START; });
+  const carryover = state.eloCarryover || {};
+  state.players.forEach(p => { elo[p] = carryover[p] ?? ELO_START; });
   const history = {};
-  state.players.forEach(p => { history[p] = [{ n: 0, rating: ELO_START }]; });
+  state.players.forEach(p => { history[p] = [{ n: 0, rating: elo[p] }]; });
   sortedMatches().forEach((m, idx) => {
     const teamAvg = (team) => team.reduce((acc, p) => acc + (elo[p] ?? ELO_START), 0) / team.length;
     const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
@@ -121,11 +146,11 @@ function computeElo() {
     const deltaB = ELO_K * (scoreB - expB);
     m.teamA.forEach(p => {
       elo[p] = (elo[p] ?? ELO_START) + deltaA;
-      history[p].push({ n: idx + 1, rating: elo[p] });
+      history[p].push({ n: idx + 1, rating: Math.round(elo[p]) });
     });
     m.teamB.forEach(p => {
       elo[p] = (elo[p] ?? ELO_START) + deltaB;
-      history[p].push({ n: idx + 1, rating: elo[p] });
+      history[p].push({ n: idx + 1, rating: Math.round(elo[p]) });
     });
   });
   return { current: elo, history };
