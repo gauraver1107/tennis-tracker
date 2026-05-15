@@ -17,9 +17,33 @@ const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang'];
 const ELO_START = 1200;
 const ELO_K = 32;
 
+// ── Season definitions (auto-detected from date) ─────────────────────────
+// SS = Spring/Summer: Mar 1 – Aug 31
+// FW = Fall/Winter:   Sep 1 – Feb 28/29
+function getCurrentSeason(dateStr) {
+  const d = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+  const month = d.getMonth() + 1; // 1-12
+  const year  = d.getFullYear();
+  if (month >= 3 && month <= 8) return { id: `SS${String(year).slice(2)}`, name: `Spring/Summer ${year}`, type: 'ss', start: `${year}-03-01`, end: `${year}-08-31` };
+  // Fall/Winter spans two years
+  const fwYear = month >= 9 ? year : year - 1;
+  const endYear = fwYear + 1;
+  const endDay  = new Date(endYear, 1, 29).getMonth() === 1 ? 29 : 28; // leap year check
+  return { id: `FW${String(fwYear).slice(2)}`, name: `Fall/Winter ${fwYear}/${String(endYear).slice(2)}`, type: 'fw', start: `${fwYear}-09-01`, end: `${endYear}-02-${endDay}` };
+}
+
+function getSeasonForMatch(m) {
+  return getCurrentSeason(m.date).id;
+}
+
+function matchesForSeason(seasonId) {
+  return sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId);
+}
+
 let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '', eloCarryover: {} };
-let trendChart = null, eloChart = null, weatherChart = null;
+let trendChart = null, eloChart = null, eloBarChart = null, winRateChart = null, weatherChart = null;
 let currentFilter = 'all';
+let currentSeasonId = getCurrentSeason().id;
 let isSyncing = false;
 let weatherCache = { data: null, fetchedAt: 0, location: null };
 let tickerCache = { messages: [], date: '', filter: '' };
@@ -126,24 +150,85 @@ function sortedMatches() {
 function filteredMatches() {
   const all = sortedMatches();
   if (currentFilter === 'all') return all;
+  if (currentFilter.startsWith('season:')) {
+    const sid = currentFilter.slice(7);
+    return all.filter(m => getCurrentSeason(m.date).id === sid);
+  }
   return all.filter(m => m.date === currentFilter);
 }
 
-function computeElo() {
+function getAllSeasons() {
+  const ids = new Set(state.matches.map(m => getCurrentSeason(m.date).id));
+  ids.add(getCurrentSeason().id);
+  return [...ids].sort().reverse().map(id => {
+    const type = id.startsWith('SS') ? 'ss' : 'fw';
+    const yr = '20' + id.slice(2);
+    const name = type === 'ss'
+      ? `☀️ Spring/Summer ${yr}`
+      : `❄️ Fall/Winter ${yr}/${String(parseInt(yr)+1).slice(2)}`;
+    return { id, name, type };
+  });
+}
+
+function renderFilter() {
+  const sel = document.getElementById('filter-weekend');
+  const seasons = getAllSeasons();
+  const dates   = [...new Set(state.matches.map(m => m.date))].sort().reverse();
+  let html = `<option value="all">All time</option>`;
+  seasons.forEach(s => {
+    html += `<option value="season:${s.id}">${s.name}</option>`;
+  });
+  dates.forEach(d => {
+    html += `<option value="${d}">${formatDate(d)}</option>`;
+  });
+  sel.innerHTML = html;
+  sel.value = currentFilter;
+  if (!sel.value) { sel.value = 'all'; currentFilter = 'all'; }
+}
+
+function renderSeasonBanner() {
+  const box = document.getElementById('season-banner');
+  if (!box) return;
+  let season = getCurrentSeason();
+  let type = season.type;
+  if (currentFilter.startsWith('season:')) {
+    const sid = currentFilter.slice(7);
+    const found = getAllSeasons().find(s => s.id === sid);
+    if (found) { type = found.type; season = getCurrentSeason(sid.startsWith('SS') ? `20${sid.slice(2)}-04-01` : `20${sid.slice(2)}-10-01`); }
+  }
+  const matches = filteredMatches();
+  const today   = new Date();
+  const endDate = new Date(season.end + 'T00:00:00');
+  const daysLeft = Math.ceil((endDate - today) / 86400000);
+  const daysStr  = daysLeft > 0 ? `${daysLeft} days left` : 'Season complete';
+  box.className = `season-banner ${type}`;
+  box.innerHTML = `
+    <div class="sb-left">
+      <div class="sb-icon">${type === 'ss' ? '☀️' : '❄️'}</div>
+      <div>
+        <div class="sb-title">${season.name || season.id}</div>
+        <div class="sb-sub">${matches.length} matches · ${formatDate(season.start)} – ${formatDate(season.end)} · ${daysStr}</div>
+      </div>
+    </div>
+    <div class="sb-badge">${season.id}</div>`;
+}
+
+function computeElo(seasonId) {
   const elo = {};
-  const carryover = state.eloCarryover || {};
-  state.players.forEach(p => { elo[p] = carryover[p] ?? ELO_START; });
+  state.players.forEach(p => { elo[p] = ELO_START; });
   const history = {};
-  state.players.forEach(p => { history[p] = [{ n: 0, rating: elo[p] }]; });
-  sortedMatches().forEach((m, idx) => {
+  state.players.forEach(p => { history[p] = [{ n: 0, rating: ELO_START }]; });
+  // Use matches for the current filter (season-aware) — hard reset to 1200 each season
+  const matches = seasonId
+    ? sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId)
+    : filteredMatches();
+  matches.forEach((m, idx) => {
     const teamAvg = (team) => team.reduce((acc, p) => acc + (elo[p] ?? ELO_START), 0) / team.length;
     const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
     const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
-    const expB = 1 - expA;
     const scoreA = m.winner === 'A' ? 1 : 0;
-    const scoreB = 1 - scoreA;
     const deltaA = ELO_K * (scoreA - expA);
-    const deltaB = ELO_K * (scoreB - expB);
+    const deltaB = ELO_K * ((1 - scoreA) - (1 - expA));
     m.teamA.forEach(p => {
       elo[p] = (elo[p] ?? ELO_START) + deltaA;
       history[p].push({ n: idx + 1, rating: Math.round(elo[p]) });
@@ -153,7 +238,9 @@ function computeElo() {
       history[p].push({ n: idx + 1, rating: Math.round(elo[p]) });
     });
   });
-  return { current: elo, history };
+  const current = {};
+  state.players.forEach(p => { current[p] = Math.round(elo[p] ?? ELO_START); });
+  return { current, history };
 }
 
 function statsFor(matches) {
@@ -304,132 +391,145 @@ function renderLeaderboard() {
 
 function renderCharts() {
   const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27'];
-  const DASHES = [[], [6,4], [2,3], [8,4,2,4], [4,2], [3,1]];
-  const matches = sortedMatches();
+  const matches = filteredMatches();
+  const eloData = computeElo();
+  const stats   = statsFor(matches);
 
-  // ── Option 1: Smooth filled area — win rate trend ──
-  const running = {};
-  state.players.forEach(p => { running[p] = { w: 0, total: 0, series: [] }; });
-  matches.forEach(m => {
-    const aWin = m.winner === 'A';
-    state.players.forEach(p => {
-      const r = running[p];
-      if (m.teamA.includes(p)) { r.total++; if (aWin) r.w++; }
-      else if (m.teamB.includes(p)) { r.total++; if (!aWin) r.w++; }
-      r.series.push(r.total ? Math.round((r.w / r.total) * 100) : null);
-    });
+  // ── Option B: ELO horizontal bar leaderboard ──────────────────────────
+  const sorted = [...state.players]
+    .sort((a, b) => eloData.current[b] - eloData.current[a]);
+  const eloVals  = sorted.map(p => eloData.current[p]);
+  const wrVals   = sorted.map(p => stats[p].matches ? stats[p].wins / stats[p].matches : 0);
+  const barColors = sorted.map((p, i) => {
+    const col = COLORS[state.players.indexOf(p) % COLORS.length];
+    return col + (wrVals[i] > 0.5 ? 'ee' : wrVals[i] > 0 ? 'bb' : '66');
   });
-  const labels = matches.map((m, i) => `#${i + 1}`);
 
-  if (trendChart) trendChart.destroy();
-  const winCanvas = document.getElementById('trendChart');
-  if (labels.length === 0) {
-    blankChart(winCanvas, 'Log a match to see trends');
+  if (eloBarChart) eloBarChart.destroy();
+  const eloBarCanvas = document.getElementById('eloBarChart');
+  if (!eloBarCanvas) return;
+  if (matches.length === 0) {
+    blankChart(eloBarCanvas, 'Log a match to see rankings');
   } else {
-    const winCtx = winCanvas.getContext('2d');
-    const winDatasets = state.players.map((p, i) => {
-      const grad = winCtx.createLinearGradient(0, 0, 0, 240);
-      grad.addColorStop(0, COLORS[i] + '55');
-      grad.addColorStop(1, COLORS[i] + '00');
-      return {
-        label: p,
-        data: running[p].series,
-        borderColor: COLORS[i],
-        backgroundColor: grad,
-        fill: true,
-        tension: 0.45,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        borderWidth: 2.5,
-        borderDash: DASHES[i],
-        spanGaps: true
-      };
+    eloBarChart = new Chart(eloBarCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: sorted.map(p => escapeHtml(p)),
+        datasets: [{
+          data: eloVals,
+          backgroundColor: barColors,
+          borderRadius: 6,
+          borderSkipped: false
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: {
+            min: Math.min(ELO_START - 20, Math.min(...eloVals) - 20),
+            grid: { color: 'rgba(127,127,127,0.08)' },
+            ticks: { font: { size: 11 } }
+          },
+          y: { grid: { display: false }, ticks: { font: { size: 12 } } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ELO ${ctx.raw} · Win rate ${Math.round(wrVals[ctx.dataIndex] * 100)}% · ${stats[sorted[ctx.dataIndex]].matches} matches`
+            }
+          }
+        }
+      }
     });
-    trendChart = new Chart(winCtx, {
-      type: 'line',
-      data: { labels, datasets: winDatasets },
+  }
+
+  // ── Option C: Win rate vertical bars ──────────────────────────────────
+  const wrSorted = [...state.players]
+    .filter(p => stats[p].matches > 0)
+    .sort((a, b) => (stats[b].wins / stats[b].matches) - (stats[a].wins / stats[a].matches));
+
+  if (winRateChart) winRateChart.destroy();
+  const wrCanvas = document.getElementById('winRateBarChart');
+  if (!wrCanvas) return;
+  if (wrSorted.length === 0) {
+    blankChart(wrCanvas, 'Log a match to see win rates');
+  } else {
+    winRateChart = new Chart(wrCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: wrSorted.map(p => escapeHtml(p)),
+        datasets: [{
+          data: wrSorted.map(p => Math.round(stats[p].wins / stats[p].matches * 100)),
+          backgroundColor: wrSorted.map(p => COLORS[state.players.indexOf(p) % COLORS.length] + 'cc'),
+          borderRadius: 6,
+          borderSkipped: false
+        }]
+      },
       options: {
         responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
         scales: {
           y: {
             min: 0, max: 100,
             ticks: { callback: v => v + '%', font: { size: 11 } },
             grid: { color: 'rgba(127,127,127,0.08)' }
           },
-          x: {
-            title: { display: true, text: 'Match #', font: { size: 11 } },
-            grid: { color: 'rgba(127,127,127,0.08)' }
-          }
+          x: { grid: { display: false }, ticks: { font: { size: 12 } } }
         },
         plugins: {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => ` ${ctx.dataset.label}: ${ctx.raw !== null ? ctx.raw + '%' : 'no matches yet'}`
+              label: ctx => ` ${ctx.raw}% win rate (${stats[wrSorted[ctx.dataIndex]].wins}W–${stats[wrSorted[ctx.dataIndex]].losses}L)`
             }
           }
         }
       }
     });
-    renderChartLegend('trendLegend', state.players, COLORS, DASHES);
   }
 
-  // ── Option 6: ELO history with gradient fill ──
-  const eloData = computeElo();
-
+  // ── ELO history line chart (clean, no fill) ───────────────────────────
   if (eloChart) eloChart.destroy();
-  const eloCanvas = document.getElementById('eloChart');
+  const eloLineCanvas = document.getElementById('eloChart');
+  if (!eloLineCanvas) return;
   if (matches.length === 0) {
-    blankChart(eloCanvas, 'ELO appears after the first match');
+    blankChart(eloLineCanvas, 'ELO history appears after first match');
+    document.getElementById('eloLegend').innerHTML = '';
   } else {
-    const eloCtx = eloCanvas.getContext('2d');
-    const eloDatasets = state.players.map((p, i) => {
-      const grad = eloCtx.createLinearGradient(0, 0, 0, 240);
-      grad.addColorStop(0, COLORS[i] + '50');
-      grad.addColorStop(1, COLORS[i] + '00');
+    const activePlayers = state.players.filter(p => eloData.history[p].length > 1);
+    const lineDatasets = activePlayers.map(p => {
+      const i = state.players.indexOf(p);
+      const col = COLORS[i % COLORS.length];
       return {
         label: p,
-        data: eloData.history[p].map(pt => ({ x: pt.n, y: Math.round(pt.rating) })),
-        borderColor: COLORS[i],
-        backgroundColor: grad,
-        fill: true,
-        tension: 0.35,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        borderWidth: 2,
-        borderDash: DASHES[i]
+        data: eloData.history[p].map(pt => ({ x: pt.n, y: pt.rating })),
+        borderColor: col,
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        pointRadius: (ctx) => (ctx.dataIndex === 0 || ctx.dataIndex === eloData.history[p].length - 1) ? 4 : 2,
+        pointHoverRadius: 6,
+        borderWidth: 2.5,
+        borderDash: i > 2 ? [5, 3] : []
       };
     });
-    eloChart = new Chart(eloCtx, {
+    eloChart = new Chart(eloLineCanvas.getContext('2d'), {
       type: 'line',
-      data: { datasets: eloDatasets },
+      data: { datasets: lineDatasets },
       options: {
         responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         scales: {
-          x: {
-            type: 'linear',
-            title: { display: true, text: 'Match #', font: { size: 11 } },
-            ticks: { stepSize: 1 },
-            grid: { color: 'rgba(127,127,127,0.08)' }
-          },
-          y: {
-            title: { display: true, text: 'ELO rating', font: { size: 11 } },
-            grid: { color: 'rgba(127,127,127,0.08)' }
-          }
+          x: { type: 'linear', title: { display: true, text: 'Match #', font: { size: 11 } }, ticks: { stepSize: 5, font: { size: 11 } }, grid: { color: 'rgba(127,127,127,0.08)' } },
+          y: { title: { display: true, text: 'ELO', font: { size: 11 } }, grid: { color: 'rgba(127,127,127,0.08)' }, ticks: { font: { size: 11 } } }
         },
         plugins: {
           legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: ctx => ` ${ctx.dataset.label}: ${ctx.raw.y}`
-            }
-          }
+          tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw.y}` } }
         }
       }
     });
-    renderChartLegend('eloLegend', state.players, COLORS, DASHES);
+    renderChartLegend('eloLegend', activePlayers, COLORS.slice(0, activePlayers.length), activePlayers.map((_, i) => i > 2 ? [5, 3] : []));
   }
 }
 
@@ -1372,17 +1472,17 @@ function getMorningHours(data, dateStr) {
   const times = data.hourly.time;
   const hours = [];
   for (let i = 0; i < times.length; i++) {
-    const t = new Date(times[i]);
     const tDate = times[i].slice(0, 10);
-    const hour = t.getHours();
+    // Parse hour directly from string "2026-05-14T06:00" — avoids timezone issues
+    const hour = parseInt(times[i].slice(11, 13), 10);
     if (tDate === dateStr && hour >= MORNING_START && hour <= MORNING_END) {
       hours.push({
         hour,
         label: hour === 12 ? '12 PM' : `${hour} AM`,
         temp: Math.round(data.hourly.temperature_2m[i]),
-        rain: data.hourly.precipitation_probability[i],
-        wind: Math.round(data.hourly.wind_speed_10m[i]),
-        code: data.hourly.weather_code[i]
+        rain: data.hourly.precipitation_probability[i] ?? 0,
+        wind: Math.round(data.hourly.wind_speed_10m[i] ?? 0),
+        code: data.hourly.weather_code[i] ?? 0
       });
     }
   }
@@ -2248,10 +2348,10 @@ function hideTickerWrap() {
 
 function renderAll() {
   renderFilter();
+  renderSeasonBanner();
   renderWeekendCoordinator();
   renderSummary();
   renderChampion();
-  renderLeaderboard();
   renderHistory();
   renderChemistry();
   renderPlayersPanel();
@@ -2282,8 +2382,9 @@ document.getElementById('filter-weekend')?.addEventListener('change', (e) => {
   currentFilter = e.target.value;
   tickerCache = { messages: [], date: '', filter: '' };
   tickerGenerated = false;
+  renderSeasonBanner();
   renderSummary();
   renderChampion();
-  renderLeaderboard();
+  renderCharts();
   setTimeout(() => generateTicker(), 100);
 });
