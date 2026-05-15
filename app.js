@@ -40,7 +40,8 @@ function matchesForSeason(seasonId) {
   return sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId);
 }
 
-let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '', eloCarryover: {} };
+let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '', eloCarryover: {},
+  location: { name: 'Edison, New Jersey', lat: 40.5187, lon: -74.4121 } };
 let trendChart = null, eloChart = null, eloBarChart = null, winRateChart = null, weatherChart = null;
 let currentFilter = 'all';
 let currentSeasonId = getCurrentSeason().id;
@@ -69,7 +70,7 @@ onSnapshot(DOC_REF, (snap) => {
     state = {
       players: data.players || [...DEFAULT_PLAYERS],
       matches: incomingMatches,
-      location: data.location || null,
+      location: data.location || { name: 'Edison, New Jersey', lat: 40.5187, lon: -74.4121 },
       availability: data.availability || {},
       photos: data.photos || [],
       apiKey: data.apiKey || '',
@@ -1432,13 +1433,33 @@ function formatDate(d) {
   return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Known locations — avoids geocoding failures for common inputs
+const KNOWN_LOCATIONS = {
+  'edison': { lat: 40.5187, lon: -74.4121, label: 'Edison, New Jersey' },
+  'edison nj': { lat: 40.5187, lon: -74.4121, label: 'Edison, New Jersey' },
+  'edison, nj': { lat: 40.5187, lon: -74.4121, label: 'Edison, New Jersey' },
+  'edison, new jersey': { lat: 40.5187, lon: -74.4121, label: 'Edison, New Jersey' },
+  'new york': { lat: 40.7128, lon: -74.0060, label: 'New York, NY' },
+};
+
 async function geocodeLocation(name) {
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json`;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (!data.results || data.results.length === 0) throw new Error('Location not found');
-  const r = data.results[0];
-  return { lat: r.latitude, lon: r.longitude, label: `${r.name}${r.admin1 ? ', ' + r.admin1 : ''}` };
+  // Check known locations first (case-insensitive)
+  const key = name.toLowerCase().trim();
+  if (KNOWN_LOCATIONS[key]) return KNOWN_LOCATIONS[key];
+
+  // Try Open-Meteo geocoding — use just the city name for better results
+  const cityName = name.split(',')[0].trim(); // "Edison, NJ" → "Edison"
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=5&language=en&format=json`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.results || data.results.length === 0) throw new Error('Location not found');
+    // Pick result in US if multiple
+    const us = data.results.find(r => r.country_code === 'US') || data.results[0];
+    return { lat: us.latitude, lon: us.longitude, label: `${us.name}${us.admin1 ? ', ' + us.admin1 : ''}` };
+  } catch(e) {
+    throw new Error(`Could not find "${name}". Try just the city name like "Edison" or "Newark".`);
+  }
 }
 
 async function fetchWeather(lat, lon) {
@@ -1568,24 +1589,29 @@ function playabilityScore(day) {
 
 async function loadWeather() {
   const forecastEl = document.getElementById('weather-forecast');
-  const adviceEl = document.getElementById('weather-play-advice');
-  const inputEl = document.getElementById('location-name');
+  const adviceEl   = document.getElementById('weather-play-advice');
+  const inputEl    = document.getElementById('location-name');
 
-  if (state.location?.name && !inputEl.dataset.userEdited) {
-    inputEl.value = state.location.name;
-  }
-  const locationName = (inputEl.value || 'Edison, NJ').trim();
+  // Always show current location name
+  const locName = state.location?.name || 'Edison, New Jersey';
+  if (!inputEl.dataset.userEdited) inputEl.value = locName;
 
-  const cacheValid = weatherCache.data && weatherCache.location === locationName && (Date.now() - weatherCache.fetchedAt) < 30 * 60 * 1000;
+  const cacheValid = weatherCache.data
+    && weatherCache.location === locName
+    && (Date.now() - weatherCache.fetchedAt) < 30 * 60 * 1000;
+
   if (!cacheValid) {
     forecastEl.innerHTML = '<div class="weather-loading">Loading forecast…</div>';
     adviceEl.innerHTML = '';
     try {
-      const geo = state.location?.lat ? state.location : await geocodeLocation(locationName);
+      // Use stored coords if available, otherwise geocode
+      let geo = state.location?.lat
+        ? { lat: state.location.lat, lon: state.location.lon }
+        : await geocodeLocation(locName);
       const weather = await fetchWeather(geo.lat, geo.lon);
-      weatherCache = { data: weather, fetchedAt: Date.now(), location: locationName, geo };
-    } catch (e) {
-      forecastEl.innerHTML = `<div class="error">Couldn't load weather for "${escapeHtml(locationName)}". Try a different location name.</div>`;
+      weatherCache = { data: weather, fetchedAt: Date.now(), location: locName, geo };
+    } catch(e) {
+      forecastEl.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
       return;
     }
   }
@@ -1721,10 +1747,11 @@ async function saveLocation() {
     const geo = await geocodeLocation(name);
     state.location = { name: geo.label, lat: geo.lat, lon: geo.lon };
     weatherCache = { data: null, fetchedAt: 0, location: null };
+    document.getElementById('location-name').dataset.userEdited = '';
     await saveState();
     loadWeather();
-  } catch (e) {
-    alert('Could not find "' + name + '". Try "City, State" or "City, Country".');
+  } catch(e) {
+    alert(e.message);
   }
 }
 
