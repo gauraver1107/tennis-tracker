@@ -38,15 +38,15 @@
       <select id="filter-weekend"></select>
       <button id="export-csv" class="btn-small">Export CSV</button>
     </div>
+    <div id="season-banner" class="season-banner"></div>
     <div id="weekend-coordinator"></div>
     <div class="summary-grid" id="summary-cards"></div>
     <div id="champion-badge" class="champion-hidden"></div>
-    <h3>Leaderboard</h3>
-    <div class="table-wrap" id="leaderboard"></div>
-    <h3>Win rate trend</h3>
-    <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
-    <div id="trendLegend" class="chart-legend-row"></div>
-    <h3>ELO rating history</h3>
+    <h3>ELO Leaderboard</h3>
+    <div class="chart-wrap tall"><canvas id="eloBarChart" aria-label="ELO leaderboard"></canvas></div>
+    <h3>Win Rate</h3>
+    <div class="chart-wrap"><canvas id="winRateBarChart" aria-label="Win rate per player"></canvas></div>
+    <h3>ELO Rating History</h3>
     <div class="chart-wrap"><canvas id="eloChart"></canvas></div>
     <div id="eloLegend" class="chart-legend-row"></div>
   </section>
