@@ -272,13 +272,6 @@ function statsFor(matches) {
   return s;
 }
 
-function renderFilter() {
-  const sel = document.getElementById('filter-weekend');
-  const weekends = [...new Set(state.matches.map(m => m.date))].sort().reverse();
-  sel.innerHTML = `<option value="all">All time</option>` +
-    weekends.map(d => `<option value="${d}">${formatDate(d)}</option>`).join('');
-  sel.value = currentFilter;
-}
 
 function computePairStreaks() {
   const streaks = {};
