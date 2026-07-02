@@ -13,7 +13,7 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const DOC_REF = doc(db, 'tennis', 'shared');
 
-const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang'];
+const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang','Manjeet'];
 const ELO_START = 1200;
 const ELO_K = 32;
 
@@ -384,7 +384,7 @@ function renderLeaderboard() {
 }
 
 function renderCharts() {
-  const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27'];
+  const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27','#14B8A6'];
   const matches = filteredMatches();
   const eloData = computeElo();
   const stats   = statsFor(matches);
@@ -664,8 +664,7 @@ function renderRotation() {
   if (n < 5) {
     box.innerHTML = `<div class="hint">Need at least 5 players set up.</div>`;
     return;
-  }
-  const matches = sortedMatches();
+  }  const matches = sortedMatches();
   const s = statsFor(matches);
   const eloData = computeElo();
   const lastMatchIdx = matches.length - 1;
@@ -736,13 +735,13 @@ function renderRotation() {
 
 function renderPlayersPanel() {
   const container = document.getElementById('player-inputs');
-  const MAX = 6;
+  const MAX = 7;
   const slots = [...state.players];
   while (slots.length < MAX) slots.push('');
   container.innerHTML = slots.map((p, i) => `
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="font-size:12px;color:var(--text-muted);min-width:18px;">${i + 1}.</span>
-      <input type="text" data-player-idx="${i}" value="${escapeHtml(p)}" placeholder="Player ${i + 1} name" style="flex:1;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--text-muted);min-width:20px">${i + 1}.</span>
+      <input type="text" data-player-idx="${i}" value="${escapeHtml(p)}" placeholder="Player ${i + 1} name" style="flex:1">
     </div>`).join('');
 }
 
@@ -751,7 +750,7 @@ function savePlayers() {
   const next = [];
   inputs.forEach(inp => { const v = inp.value.trim(); if (v) next.push(v); });
   if (next.length < 5) { alert('You need at least 5 player names.'); return; }
-  if (next.length > 6) { alert('Maximum 6 players supported.'); return; }
+  if (next.length > 7) { alert('Maximum 7 players supported.'); return; }
   if (new Set(next).size !== next.length) { alert('Player names must be unique.'); return; }
   const rename = {};
   state.players.forEach((old, i) => { if (next[i]) rename[old] = next[i]; });
@@ -1466,8 +1465,8 @@ async function fetchWeather(lat, lon) {
   const params = new URLSearchParams({
     latitude: lat,
     longitude: lon,
-    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,sunrise,sunset',
-    hourly: 'temperature_2m,precipitation_probability,wind_speed_10m,weather_code',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,uv_index_max,sunrise,sunset',
+    hourly: 'temperature_2m,precipitation_probability,wind_speed_10m,weather_code,uv_index',
     temperature_unit: 'celsius',
     wind_speed_unit: 'kmh',
     precipitation_unit: 'mm',
@@ -1496,13 +1495,37 @@ function getMorningHours(data, dateStr) {
         temp: Math.round(data.hourly.temperature_2m[i]),
         rain: data.hourly.precipitation_probability[i] ?? 0,
         wind: Math.round(data.hourly.wind_speed_10m[i] ?? 0),
-        code: data.hourly.weather_code[i] ?? 0
+        code: data.hourly.weather_code[i] ?? 0,
+        uv:   Math.round((data.hourly.uv_index?.[i] ?? 0) * 10) / 10
       });
     }
   }
   return hours;
 }
 
+
+// ── UV Index helpers ───────────────────────────────────────────────────────
+function uvLevel(uv) {
+  if (uv >= 11) return { level: 'Extreme',   color: '#7B2FBE', bg: 'rgba(123,47,190,0.12)', text: 'Extreme UV — avoid outdoor play',       emoji: '🟣', rank: 'extreme' };
+  if (uv >= 8)  return { level: 'Very High', color: '#D85A30', bg: 'rgba(216,90,48,0.12)',  text: 'Very high UV — SPF 50+, seek shade',     emoji: '🔴', rank: 'veryhigh' };
+  if (uv >= 6)  return { level: 'High',      color: '#EF9F27', bg: 'rgba(239,159,39,0.12)', text: 'High UV — wear sunscreen and hat',         emoji: '🟠', rank: 'high' };
+  if (uv >= 3)  return { level: 'Moderate',  color: '#F5C842', bg: 'rgba(245,200,66,0.12)', text: 'Moderate UV — sunscreen recommended',      emoji: '🟡', rank: 'moderate' };
+  return         { level: 'Low',             color: '#1D9E75', bg: 'rgba(29,158,117,0.12)', text: 'Low UV — safe to play without sunscreen',  emoji: '🟢', rank: 'low' };
+}
+function uvDotColor(uv) {
+  if (uv >= 11) return '#7B2FBE';
+  if (uv >= 8)  return '#D85A30';
+  if (uv >= 6)  return '#EF9F27';
+  if (uv >= 3)  return '#F5C842';
+  return '#1D9E75';
+}
+function renderUVCard(hours, dailyUvMax) {
+  const peakUV = hours.length ? Math.max(...hours.map(h => h.uv || 0)) : (dailyUvMax || 0);
+  const peakHour = hours.length ? hours.reduce((b,h)=>(h.uv||0)>(b.uv||0)?h:b, hours[0]) : null;
+  const info = uvLevel(peakUV);
+  const pct = Math.min(100, peakUV / 12 * 100).toFixed(0);
+  return '<div class="uv-card uv-' + info.rank + '"><div class="uv-left"><div class="uv-emoji">' + info.emoji + '</div><div><div class="uv-label">UV Index 6 AM-12 PM</div><div class="uv-title">' + info.level + ' <span class="uv-num">' + peakUV.toFixed(1) + '</span>' + (peakHour ? ' <span class="uv-peak-time">peaks ' + peakHour.label + '</span>' : '') + '</div><div class="uv-advice">' + info.text + '</div></div></div><div class="uv-bar-wrap"><div class="uv-track"><div class="uv-fill" style="width:' + pct + '%;background:' + info.color + '"></div></div><div class="uv-zones"><span style="color:#1D9E75">Low 0</span><span style="color:#F5C842">Mod 3</span><span style="color:#EF9F27">High 6</span><span style="color:#D85A30">8+</span><span style="color:#7B2FBE">11+</span></div></div></div>';
+}
 function morningPlayability(hours) {
   if (!hours || hours.length === 0) return null;
   const peakRain = Math.max(...hours.map(h => h.rain));
@@ -1645,7 +1668,8 @@ function renderWeather() {
           <div class="verdict-label">${dayName} morning · 6 AM – 12 PM</div>
           <div class="verdict-text">${verdict.reason}</div>
         </div>
-      </div>`;
+      </div>
+      ${renderUVCard(morningHours, daily.uv_index_max?.[nextWeekend] ?? 0)}`;
   } else {
     adviceEl.innerHTML = '';
   }
@@ -1842,6 +1866,7 @@ async function renderWeekendCoordinator() {
                 <div class="wc-h-temp">${h.temp}°C</div>
                 <div class="wc-h-rain">💧${h.rain}%</div>
                 <div class="wc-h-wind">💨${h.wind}</div>
+                ${h.uv != null ? `<div class="wc-h-uv" style="color:${uvDotColor(h.uv)}">UV ${h.uv.toFixed(0)}</div>` : ''}
                 ${isBest ? '<div class="wc-best-badge">Best</div>' : ''}
               </div>`;
           }).join('')}
