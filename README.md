@@ -7,8 +7,8 @@ A shared doubles-tennis tracker for 5 friends. Real-time sync across phones, ELO
 ## 📋 What you need (all free)
 
 1. A **Google account** (for Firebase)
-2. A **GitHub account** (for hosting the code) 
-3. A **Vercel account** (for the live website) 
+2. A **GitHub account** (for hosting the code) — we'll create one
+3. A **Vercel account** (for the live website) — we'll create one
 
 **Total time:** about 45 minutes. **Total cost:** $0.
 
@@ -31,7 +31,7 @@ Firebase is Google's free service that will store your match data. The free tier
 
 1. In the left sidebar, click **"Build"** → **"Firestore Database"**
 2. Click **"Create database"**
-3. Choose **"Start in test mode"** (this lets your friends read/write for 30 days )
+3. Choose **"Start in test mode"** (this lets your friends read/write for 30 days — we'll extend it later)
 4. Pick a location near you (for US: `us-east1` or `us-central1`). Click **Enable**
 
 ### 1c. Register your web app
@@ -207,6 +207,16 @@ This is why this setup is perfect for iterating based on feedback.
 
 ---
 
+## 💡 Ideas for future features
+
+- Weather tracking per match (call a free weather API)
+- Photo upload for memorable moments
+- Voice entry ("Siri, tell the tennis app Alice and Bob won")
+- Yearly awards (most matches played, biggest upset, longest win streak)
+- Separate singles tracking
+- Add a 6th/7th player
+
+When you're ready for any of these, just ask Claude!
 
 ---
 
