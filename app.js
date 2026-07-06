@@ -50,6 +50,7 @@ let weatherCache = { data: null, fetchedAt: 0, location: null };
 let tickerCache = { messages: [], date: '', filter: '' };
 let tickerGenerated = false;
 let lastKnownMatchCount = 0; // safety guard — tracks highest match count seen
+let firebaseLoaded = false;  // safety guard — no saves allowed until first sync arrives
 
 function setStatus(text, cls) {
   const el = document.getElementById('sync-status');
@@ -94,6 +95,7 @@ onSnapshot(DOC_REF, (snap) => {
     m.sets.forEach(s => { if (s.tbA === undefined) s.tbA = null; if (s.tbB === undefined) s.tbB = null; });
     if (m.notes === undefined) m.notes = '';
   });
+  firebaseLoaded = true; // first sync complete — saves are now allowed
   setStatus('Synced', 'online');
   if (!tickerGenerated && state.matches.length > 0 && state.apiKey) {
     tickerGenerated = true;
@@ -107,7 +109,15 @@ onSnapshot(DOC_REF, (snap) => {
 
 async function saveState() {
   if (isSyncing) return;
-  // Safety guard — never write empty matches array if we know we had data
+  // Safety guard 1 — NEVER save before the first Firebase sync has arrived.
+  // This closes the race condition where a user action (vote, location, API key)
+  // triggers a save while state is still the empty default, wiping the database.
+  if (!firebaseLoaded) {
+    console.warn('saveState blocked — Firebase not loaded yet, refusing to write default empty state');
+    setStatus('Still loading — try again in a moment', 'offline');
+    return;
+  }
+  // Safety guard 2 — never write empty matches array if we know we had data
   if (state.matches.length === 0 && lastKnownMatchCount > 0) {
     console.warn('saveState blocked — would overwrite', lastKnownMatchCount, 'matches with empty array');
     setStatus('Save blocked — data safety', 'offline');
