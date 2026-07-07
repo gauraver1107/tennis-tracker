@@ -40,7 +40,7 @@ function matchesForSeason(seasonId) {
   return sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId);
 }
 
-let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '', eloCarryover: {},
+let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '', eloCarryover: {}, playerAvatars: {},
   location: { name: 'Edison, New Jersey', lat: 40.5187, lon: -74.4121 } };
 let trendChart = null, eloChart = null, eloBarChart = null, winRateChart = null, weatherChart = null;
 let currentFilter = 'all';
@@ -75,7 +75,8 @@ onSnapshot(DOC_REF, (snap) => {
       availability: data.availability || {},
       photos: data.photos || [],
       apiKey: data.apiKey || '',
-      eloCarryover: data.eloCarryover || {}
+      eloCarryover: data.eloCarryover || {},
+      playerAvatars: data.playerAvatars || {}
     };
     if (incomingMatches.length > lastKnownMatchCount) {
       lastKnownMatchCount = incomingMatches.length;
@@ -87,7 +88,7 @@ onSnapshot(DOC_REF, (snap) => {
       setStatus('Synced', 'online');
       return;
     }
-    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [], apiKey: '' };
+    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [], apiKey: '', playerAvatars: {} };
   }
   if (state.players.length < 5) state.players = [...DEFAULT_PLAYERS];
   state.matches.forEach(m => {
@@ -509,11 +510,12 @@ function renderPowerRankings() {
     const dots = form.map(w => `<span class="pr-dot ${w ? 'w' : 'l'}"></span>`).join('');
     const sub = playerSubtitle(p, { rank, order, eloData, stats, careerStats, king, streak, streakType });
     const isKing = king && king.king === p;
+    const avatarHtml = playerAvatarHtml(p, 'pr-avatar');
     return `
       <div class="pr-row ${isKing ? 'pr-king' : ''}">
         <span class="pr-rank">${rank}</span>
         ${moveHtml}
-        <span class="pr-avatar" style="background:${playerColor(p)}">${escapeHtml(p.slice(0, 2).toUpperCase())}</span>
+        ${avatarHtml}
         <div class="pr-info">
           <div class="pr-name">${escapeHtml(p)}${isKing ? ' <span class="pr-crown">👑</span>' : ''}</div>
           <div class="pr-sub">${sub}</div>
@@ -602,7 +604,10 @@ function renderChampion() {
   const champ = rows[0];
   box.className = 'champion-badge';
   box.innerHTML = `
-    <div class="trophy">🏆</div>
+    <div class="champ-avatar-wrap">
+      ${playerAvatarHtml(champ.name, 'champ-avatar')}
+      <span class="champ-trophy">🏆</span>
+    </div>
     <div>
       <div class="label">Champion of the weekend</div>
       <div class="name">${escapeHtml(champ.name)} — ${champ.wins}-${champ.losses}, ${Math.round(champ.winRate * 100)}%</div>
@@ -853,11 +858,16 @@ function renderMatchCard(m) {
     return `${s.a}-${s.b}${tb}`;
   }).join(', ');
   const notes = m.notes ? `<div class="notes">"${escapeHtml(m.notes)}"</div>` : '';
+  const teamLine = (team, won) => `
+    <div class="team-line ${won ? 'winner' : ''}">
+      <span class="mc-avatars">${team.map(p => playerAvatarHtml(p, 'mc-avatar')).join('')}</span>
+      <span>${escapeHtml(team.join(' & '))}${won ? ' ✓' : ''}</span>
+    </div>`;
   return `
     <div class="match-card">
       <div class="teams">
-        <div class="team-line ${aWin ? 'winner' : ''}">${escapeHtml(m.teamA.join(' & '))}${aWin ? ' ✓' : ''}</div>
-        <div class="team-line ${!aWin ? 'winner' : ''}">${escapeHtml(m.teamB.join(' & '))}${!aWin ? ' ✓' : ''}</div>
+        ${teamLine(m.teamA, aWin)}
+        ${teamLine(m.teamB, !aWin)}
         <div class="score">${score}</div>
         ${notes}
       </div>
@@ -995,16 +1005,80 @@ function renderRotation() {
     </div>`;
 }
 
+function playerAvatarUrl(name) {
+  const entry = (state.playerAvatars || {})[name];
+  if (!entry) return null;
+  return typeof entry === 'string' ? entry : entry.url;
+}
+
+// Reusable avatar — photo if set, colored initials circle otherwise
+function playerAvatarHtml(p, cls) {
+  const url = playerAvatarUrl(p);
+  return url
+    ? `<img class="${cls}" src="${escapeHtml(url)}" alt="${escapeHtml(p)}" loading="lazy">`
+    : `<span class="${cls} avatar-initials" style="background:${playerColor(p)}">${escapeHtml(p.slice(0, 2).toUpperCase())}</span>`;
+}
+
 function renderPlayersPanel() {
   const container = document.getElementById('player-inputs');
   const MAX = 7;
   const slots = [...state.players];
   while (slots.length < MAX) slots.push('');
-  container.innerHTML = slots.map((p, i) => `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+  container.innerHTML = slots.map((p, i) => {
+    const av = p ? playerAvatarUrl(p) : null;
+    const avatarHtml = av
+      ? `<img class="pp-avatar" src="${escapeHtml(av)}" alt="${escapeHtml(p)}">`
+      : `<span class="pp-avatar pp-initials" style="background:${p ? playerColor(p) : 'var(--border-strong)'}">${p ? escapeHtml(p.slice(0, 2).toUpperCase()) : '?'}</span>`;
+    return `
+    <div class="pp-row">
       <span style="font-size:12px;color:var(--text-muted);min-width:20px">${i + 1}.</span>
+      ${avatarHtml}
       <input type="text" data-player-idx="${i}" value="${escapeHtml(p)}" placeholder="Player ${i + 1} name" style="flex:1">
-    </div>`).join('');
+      ${p ? `<button class="btn-small pp-photo-btn" data-avatar-player="${escapeHtml(p)}" title="Set photo">📷</button>` : ''}
+    </div>`;
+  }).join('');
+  container.querySelectorAll('[data-avatar-player]').forEach(btn => {
+    btn.addEventListener('click', () => pickAvatar(btn.dataset.avatarPlayer, btn));
+  });
+}
+
+function pickAvatar(player, btn) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (!firebaseLoaded) { alert('Still connecting — try again in a moment.'); return; }
+    const originalText = btn.textContent;
+    btn.textContent = '…';
+    btn.disabled = true;
+    setStatus('Uploading photo…', '');
+    try {
+      const blob = await compressImage(file, 256, 0.85);
+      const id = 'avatar_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      const path = `avatars/${id}.jpg`;
+      const sref = storageRef(storage, path);
+      await uploadBytes(sref, blob, { contentType: 'image/jpeg' });
+      const url = await getDownloadURL(sref);
+      // clean up the previous avatar file, if any
+      const prev = (state.playerAvatars || {})[player];
+      if (prev && prev.path) {
+        try { await deleteObject(storageRef(storage, prev.path)); } catch (e) { console.warn('Old avatar cleanup skipped:', e.message); }
+      }
+      if (!state.playerAvatars) state.playerAvatars = {};
+      state.playerAvatars[player] = { url, path };
+      await saveState();
+      renderPlayersPanel();
+      renderPowerRankings();
+    } catch (e) {
+      console.error('Avatar upload failed:', e);
+      alert('Photo upload failed: ' + e.message);
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  });
+  input.click();
 }
 
 function savePlayers() {
@@ -1016,6 +1090,11 @@ function savePlayers() {
   if (new Set(next).size !== next.length) { alert('Player names must be unique.'); return; }
   const rename = {};
   state.players.forEach((old, i) => { if (next[i]) rename[old] = next[i]; });
+  if (state.playerAvatars) {
+    const remapped = {};
+    Object.entries(state.playerAvatars).forEach(([name, v]) => { remapped[rename[name] || name] = v; });
+    state.playerAvatars = remapped;
+  }
   state.matches = state.matches.map(m => ({
     ...m,
     teamA: m.teamA.map(p => rename[p] || p),
