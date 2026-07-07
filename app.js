@@ -145,6 +145,7 @@ function setupTabs() {
       document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
       document.getElementById('panel-' + btn.dataset.tab).classList.remove('hidden');
       if (btn.dataset.tab === 'dashboard') renderCharts();
+      if (btn.dataset.tab === 'history') requestAnimationFrame(() => renderCharts());
       if (btn.dataset.tab === 'rotation') renderRotation();
       if (btn.dataset.tab === 'weather') loadWeather();
       if (btn.dataset.tab === 'photos') renderPhotos();
@@ -303,6 +304,257 @@ function computePairStreaks() {
   return streaks;
 }
 
+// ── Power rankings ────────────────────────────────────────────────────────
+const PLAYER_COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27','#14B8A6'];
+
+function playerColor(name) {
+  const idx = state.players.indexOf(name);
+  return PLAYER_COLORS[idx >= 0 ? idx % PLAYER_COLORS.length : 0];
+}
+
+// ELO over an arbitrary ordered list of matches (no filter dependency)
+function eloOver(matches) {
+  const elo = {};
+  state.players.forEach(p => { elo[p] = ELO_START; });
+  matches.forEach(m => {
+    const teamAvg = t => t.reduce((a, p) => a + (elo[p] ?? ELO_START), 0) / t.length;
+    const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
+    const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
+    const sA = m.winner === 'A' ? 1 : 0;
+    const dA = ELO_K * (sA - expA), dB = ELO_K * ((1 - sA) - (1 - expA));
+    m.teamA.forEach(p => { elo[p] = (elo[p] ?? ELO_START) + dA; });
+    m.teamB.forEach(p => { elo[p] = (elo[p] ?? ELO_START) + dB; });
+  });
+  const out = {};
+  state.players.forEach(p => { out[p] = Math.round(elo[p] ?? ELO_START); });
+  return out;
+}
+
+function playedCounts(matches) {
+  const c = {};
+  state.players.forEach(p => { c[p] = 0; });
+  matches.forEach(m => [...m.teamA, ...m.teamB].forEach(p => { if (c[p] !== undefined) c[p]++; }));
+  return c;
+}
+
+// Last-N form dots + current win/loss streak for a player
+function playerFormAndStreak(matches, player, n = 5) {
+  const results = [];
+  for (let i = matches.length - 1; i >= 0 && results.length < n; i--) {
+    const m = matches[i];
+    const inA = m.teamA.includes(player), inB = m.teamB.includes(player);
+    if (!inA && !inB) continue;
+    results.unshift((m.winner === 'A') === inA);
+  }
+  let streak = 0, streakType = null;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const m = matches[i];
+    const inA = m.teamA.includes(player), inB = m.teamB.includes(player);
+    if (!inA && !inB) continue;
+    const won = (m.winner === 'A') === inA;
+    if (streakType === null) { streakType = won ? 'W' : 'L'; streak = 1; }
+    else if ((streakType === 'W') === won) streak++;
+    else break;
+  }
+  return { form: results, streak, streakType };
+}
+
+// King of the court — crown transfers when the current king is on the losing
+// team; new king = highest-ELO player (at that moment) on the winning team.
+function computeKingOfCourt(matches) {
+  if (!matches.length) return null;
+  const elo = {};
+  state.players.forEach(p => { elo[p] = ELO_START; });
+  let king = null, since = null;
+  matches.forEach(m => {
+    const winners = m.winner === 'A' ? m.teamA : m.teamB;
+    const losers  = m.winner === 'A' ? m.teamB : m.teamA;
+    if (!king || losers.includes(king)) {
+      king = [...winners].sort((a, b) => (elo[b] ?? ELO_START) - (elo[a] ?? ELO_START))[0];
+      since = m.date;
+    }
+    const teamAvg = t => t.reduce((a, p) => a + (elo[p] ?? ELO_START), 0) / t.length;
+    const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
+    const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
+    const sA = m.winner === 'A' ? 1 : 0;
+    const dA = ELO_K * (sA - expA), dB = ELO_K * ((1 - sA) - (1 - expA));
+    m.teamA.forEach(p => { elo[p] = (elo[p] ?? ELO_START) + dA; });
+    m.teamB.forEach(p => { elo[p] = (elo[p] ?? ELO_START) + dB; });
+  });
+  const weekends = new Set(matches.filter(m => m.date >= since).map(m => m.date)).size;
+  return { king, since, weekends };
+}
+
+// Head-to-head records between players when on OPPOSITE teams
+function computeRivalries(matches, topN = 2) {
+  const h2h = {};
+  matches.forEach(m => {
+    m.teamA.forEach(a => m.teamB.forEach(b => {
+      const key = [a, b].sort().join('|');
+      if (!h2h[key]) h2h[key] = { pair: [a, b].sort(), wins: {}, lastWinner: null, lastStreak: 0 };
+      const rec = h2h[key];
+      const winner = m.winner === 'A' ? a : b;
+      rec.wins[winner] = (rec.wins[winner] || 0) + 1;
+      if (rec.lastWinner === winner) rec.lastStreak++;
+      else { rec.lastWinner = winner; rec.lastStreak = 1; }
+    }));
+  });
+  return Object.values(h2h)
+    .map(r => {
+      const [p1, p2] = r.pair;
+      const w1 = r.wins[p1] || 0, w2 = r.wins[p2] || 0;
+      return { ...r, p1, p2, w1, w2, total: w1 + w2 };
+    })
+    .filter(r => r.total >= 3)
+    .sort((a, b) => b.total - a.total || Math.abs(a.w1 - a.w2) - Math.abs(b.w1 - b.w2))
+    .slice(0, topN);
+}
+
+// ELO-based win probability for the likely next matchup.
+// Uses availability votes for the upcoming weekend when 4+ are in,
+// otherwise falls back to the four players from the most recent match.
+function computeMatchupForecast() {
+  const eloMap = computeElo().current;
+  const nextWeekend = getUpcomingWeekendDates()[0];
+  const votes = (state.availability || {})[nextWeekend] || {};
+  const inPlayers = state.players.filter(p => votes[p] === 'in');
+  let pool, label;
+  if (inPlayers.length >= 4) {
+    pool = [...inPlayers].sort((a, b) => (eloMap[b] ?? ELO_START) - (eloMap[a] ?? ELO_START)).slice(0, 4);
+    label = `Forecast · ${formatDate(nextWeekend)}`;
+  } else {
+    const last = sortedMatches().slice(-1)[0];
+    if (!last) return null;
+    pool = [...last.teamA, ...last.teamB];
+    label = 'Next matchup forecast';
+  }
+  if (pool.length < 4) return null;
+  const s = [...pool].sort((a, b) => (eloMap[b] ?? ELO_START) - (eloMap[a] ?? ELO_START));
+  const teamA = [s[0], s[3]], teamB = [s[1], s[2]]; // balanced pairing 1&4 vs 2&3
+  const avg = t => t.reduce((acc, p) => acc + (eloMap[p] ?? ELO_START), 0) / t.length;
+  const pA = 1 / (1 + Math.pow(10, (avg(teamB) - avg(teamA)) / 400));
+  const fav = pA >= 0.5 ? teamA : teamB;
+  const dog = pA >= 0.5 ? teamB : teamA;
+  const pct = Math.round(Math.max(pA, 1 - pA) * 100);
+  return { label, text: `${fav.join(' & ')} ${pct}% over ${dog.join(' & ')}` };
+}
+
+// One-line hook per player, in priority order
+function playerSubtitle(p, ctx) {
+  const { rank, order, eloData, stats, careerStats, king, streak, streakType } = ctx;
+  if (king && king.king === p) {
+    return `King of the court · ${king.weekends} weekend${king.weekends === 1 ? '' : 's'}`;
+  }
+  if (streakType === 'W' && streak >= 3) return `🔥 ${streak}-match win streak`;
+  if (streakType === 'L' && streak >= 3) return `❄️ ${streak} straight losses — bounce-back time`;
+  const careerWins = careerStats[p]?.wins ?? 0;
+  if (careerWins >= 10) {
+    const next = Math.ceil((careerWins + 1) / 25) * 25;
+    const need = next - careerWins;
+    if (need <= 3) return `${need} win${need === 1 ? '' : 's'} from ${next} career wins`;
+  }
+  if (rank === order.length && order.length >= 3) {
+    const above = order[rank - 2];
+    const gap = (eloData.current[above] ?? ELO_START) - (eloData.current[p] ?? ELO_START);
+    if (gap <= 35) return `1 win from escaping last place`;
+  }
+  if (rank > 1) {
+    const above = order[rank - 2];
+    const gap = (eloData.current[above] ?? ELO_START) - (eloData.current[p] ?? ELO_START);
+    if (gap <= 15) return `${gap} pt${gap === 1 ? '' : 's'} behind ${above}`;
+  }
+  if (streakType === 'W' && streak === 2) return `Won last 2 — heating up`;
+  const s = stats[p];
+  const pct = s.matches ? Math.round((s.wins / s.matches) * 100) : 0;
+  return `${s.wins}W–${s.losses}L · ${pct}% win rate`;
+}
+
+function renderPowerRankings() {
+  const box = document.getElementById('power-rankings');
+  if (!box) return;
+  const matches = filteredMatches();
+  if (matches.length === 0) { box.innerHTML = ''; return; }
+
+  const eloData = computeElo();
+  const played = playedCounts(matches);
+  const order = [...state.players]
+    .filter(p => played[p] > 0)
+    .sort((a, b) => (eloData.current[b] ?? ELO_START) - (eloData.current[a] ?? ELO_START));
+
+  // Movement = rank now vs rank before the most recent match date in scope
+  const lastDate = matches[matches.length - 1].date;
+  const prevMatches = matches.filter(m => m.date !== lastDate);
+  const prevElo = eloOver(prevMatches);
+  const prevPlayed = playedCounts(prevMatches);
+  const prevOrder = [...state.players]
+    .filter(p => prevPlayed[p] > 0)
+    .sort((a, b) => prevElo[b] - prevElo[a]);
+
+  const king = computeKingOfCourt(matches);
+  const stats = statsFor(matches);
+  const careerStats = statsFor(sortedMatches());
+
+  const rows = order.map((p, i) => {
+    const rank = i + 1;
+    const prevIdx = prevOrder.indexOf(p);
+    let moveHtml;
+    if (prevIdx === -1) moveHtml = `<span class="pr-move new">NEW</span>`;
+    else {
+      const diff = prevIdx - i;
+      moveHtml = diff > 0 ? `<span class="pr-move up">▲${diff}</span>`
+        : diff < 0 ? `<span class="pr-move down">▼${-diff}</span>`
+        : `<span class="pr-move flat">—</span>`;
+    }
+    const { form, streak, streakType } = playerFormAndStreak(matches, p);
+    const dots = form.map(w => `<span class="pr-dot ${w ? 'w' : 'l'}"></span>`).join('');
+    const sub = playerSubtitle(p, { rank, order, eloData, stats, careerStats, king, streak, streakType });
+    const isKing = king && king.king === p;
+    return `
+      <div class="pr-row ${isKing ? 'pr-king' : ''}">
+        <span class="pr-rank">${rank}</span>
+        ${moveHtml}
+        <span class="pr-avatar" style="background:${playerColor(p)}">${escapeHtml(p.slice(0, 2).toUpperCase())}</span>
+        <div class="pr-info">
+          <div class="pr-name">${escapeHtml(p)}${isKing ? ' <span class="pr-crown">👑</span>' : ''}</div>
+          <div class="pr-sub">${sub}</div>
+        </div>
+        <div class="pr-form">${dots}</div>
+        <span class="pr-elo">${eloData.current[p] ?? ELO_START}</span>
+      </div>`;
+  }).join('');
+
+  const watchCards = [];
+  computeRivalries(matches).forEach(r => {
+    const leadTxt = r.w1 === r.w2
+      ? `Tied ${r.w1}–${r.w2}`
+      : (r.w1 > r.w2 ? `${r.p1} leads ${r.w1}–${r.w2}` : `${r.p2} leads ${r.w2}–${r.w1}`);
+    const streakTxt = r.lastStreak >= 2 ? ` · ${r.lastWinner} won last ${r.lastStreak}` : '';
+    watchCards.push(`
+      <div class="rw-card">
+        <div class="rw-title">${escapeHtml(r.p1)} vs ${escapeHtml(r.p2)}</div>
+        <div class="rw-sub">${escapeHtml(leadTxt + streakTxt)}</div>
+      </div>`);
+  });
+  const forecast = computeMatchupForecast();
+  if (forecast) {
+    watchCards.push(`
+      <div class="rw-card rw-forecast">
+        <div class="rw-title">🔮 ${escapeHtml(forecast.label)}</div>
+        <div class="rw-sub">${escapeHtml(forecast.text)}</div>
+      </div>`);
+  }
+
+  box.innerHTML = `
+    <div class="pr-card">
+      <div class="pr-header">
+        <span class="pr-heading">🏅 Power rankings</span>
+        <span class="pr-date">Through ${formatDate(lastDate)} · Match ${matches.length}</span>
+      </div>
+      ${rows}
+      ${watchCards.length ? `<div class="rw-label">Rivalry watch</div><div class="rw-grid">${watchCards.join('')}</div>` : ''}
+    </div>`;
+}
+
 function renderSummary() {
   const matches = filteredMatches();
   const totalMatches = matches.length;
@@ -394,7 +646,7 @@ function renderLeaderboard() {
 }
 
 function renderCharts() {
-  const COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27','#14B8A6'];
+  const COLORS = PLAYER_COLORS;
   const matches = filteredMatches();
   const eloData = computeElo();
   const stats   = statsFor(matches);
@@ -2234,7 +2486,39 @@ function buildTickerContext() {
     return gap > (best?.gap || 0) ? { match: m, gap } : best;
   }, null);
 
+  // Power-ranking extras for richer commentary
+  const king = computeKingOfCourt(allMatches);
+  const milestones = [];
+  state.players.forEach(p => {
+    if (playerStats[p].matches === 0) return;
+    const w = playerStats[p].wins;
+    if (w >= 10) {
+      const next = Math.ceil((w + 1) / 25) * 25;
+      if (next - w <= 2) milestones.push(`${p} is ${next - w} win${next - w === 1 ? '' : 's'} from ${next} career wins`);
+    }
+  });
+  const lastDate = allMatches.length ? allMatches[allMatches.length - 1].date : null;
+  const rankMovers = [];
+  if (lastDate) {
+    const prev = allMatches.filter(m => m.date !== lastDate);
+    const prevElo = eloOver(prev);
+    const prevPlayed = playedCounts(prev);
+    const played = playedCounts(allMatches);
+    const nowOrder = state.players.filter(p => played[p] > 0)
+      .sort((a, b) => (eloData.current[b] ?? 1200) - (eloData.current[a] ?? 1200));
+    const prevOrder = state.players.filter(p => prevPlayed[p] > 0)
+      .sort((a, b) => prevElo[b] - prevElo[a]);
+    nowOrder.forEach((p, i) => {
+      const pi = prevOrder.indexOf(p);
+      if (pi >= 0 && pi - i !== 0) rankMovers.push(`${p} ${pi - i > 0 ? 'climbed' : 'dropped'} ${Math.abs(pi - i)} spot${Math.abs(pi - i) === 1 ? '' : 's'} to #${i + 1}`);
+    });
+  }
+
   return {
+    king: king ? king.king : null,
+    kingWeekends: king ? king.weekends : 0,
+    milestones,
+    rankMovers,
     todayStar,
     todayMatches: todayMatches.length,
     todayScores: todayMatches.map(m => {
@@ -2286,6 +2570,9 @@ ${ctx.winRates.filter(p => p.wins + p.losses > 0).map(p => `${p.name}: ${p.wins}
 Today (${ctx.todayMatches} matches): ${ctx.todayScores.join(' | ') || 'none today yet'}
 Today star: ${ctx.todayStar || 'none yet'} | ELO leader: ${ctx.eloLeader} (${ctx.eloLeaderRating}) | Total: ${ctx.totalMatches} matches
 ${ctx.biggestUpsetWinners ? `Biggest upset: ${ctx.biggestUpsetWinners.join(' & ')} won ${ctx.biggestUpsetScore}` : ''}
+${ctx.king ? `King of the Court 👑: ${ctx.king} (held ${ctx.kingWeekends} weekend${ctx.kingWeekends === 1 ? '' : 's'})` : ''}
+${ctx.milestones.length ? `Approaching milestones: ${ctx.milestones.join('; ')}` : ''}
+${ctx.rankMovers.length ? `Latest rank moves: ${ctx.rankMovers.join('; ')}` : ''}
 
 ENGLISH RULES (messages 1-2):
 - Max 12 words each
@@ -2295,6 +2582,7 @@ ENGLISH RULES (messages 1-2):
 - Always uplifting — "X is finding their rhythm!", "Watch out for Y!", "Z's time is coming!"
 - Use emojis 🎾 😄 🔥 💪 👑 🚀 ⭐
 - Include 🏆 next to today's star's name
+- When exciting, reference the King of the Court crown, an approaching milestone, or a big rank climb
 
 HARYANVI HINDI RULES (message 3 — must be in Devanagari script):
 - Warm, celebratory, motivational — NEVER negative or demotivating
@@ -2403,6 +2691,7 @@ function hideTickerWrap() {
 
 function renderAll() {
   renderFilter();
+  renderPowerRankings();
   renderSeasonBanner();
   renderWeekendCoordinator();
   renderSummary();
@@ -2437,6 +2726,7 @@ document.getElementById('filter-weekend')?.addEventListener('change', (e) => {
   currentFilter = e.target.value;
   tickerCache = { messages: [], date: '', filter: '' };
   tickerGenerated = false;
+  renderPowerRankings();
   renderSeasonBanner();
   renderSummary();
   renderChampion();
