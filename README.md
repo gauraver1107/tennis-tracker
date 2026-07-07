@@ -207,17 +207,5 @@ This is why this setup is perfect for iterating based on feedback.
 
 ---
 
-## 💡 Ideas for future features
-
-- Weather tracking per match (call a free weather API)
-- Photo upload for memorable moments
-- Voice entry ("Siri, tell the tennis app Alice and Bob won")
-- Yearly awards (most matches played, biggest upset, longest win streak)
-- Separate singles tracking
-- Add a 6th/7th player
-
-When you're ready for any of these, just ask Claude!
-
----
 
 Built with ❤️ and 🎾
