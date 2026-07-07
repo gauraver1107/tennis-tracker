@@ -38,6 +38,7 @@
       <select id="filter-weekend"></select>
       <button id="export-csv" class="btn-small">Export CSV</button>
     </div>
+    <div id="power-rankings"></div>
     <div id="season-banner" class="season-banner"></div>
     <div id="weekend-coordinator"></div>
     <div class="summary-grid" id="summary-cards"></div>
@@ -46,9 +47,6 @@
     <div class="chart-wrap tall"><canvas id="eloBarChart" aria-label="ELO leaderboard"></canvas></div>
     <h3>Win Rate</h3>
     <div class="chart-wrap"><canvas id="winRateBarChart" aria-label="Win rate per player"></canvas></div>
-    <h3>ELO Rating History</h3>
-    <div class="chart-wrap"><canvas id="eloChart"></canvas></div>
-    <div id="eloLegend" class="chart-legend-row"></div>
   </section>
 
   <section id="panel-log" class="panel hidden">
@@ -144,6 +142,10 @@
   </section>
 
   <section id="panel-history" class="panel hidden">
+    <h3>ELO Rating History</h3>
+    <div class="chart-wrap"><canvas id="eloChart"></canvas></div>
+    <div id="eloLegend" class="chart-legend-row"></div>
+    <h3>Matches</h3>
     <div id="history-list"></div>
   </section>
 
