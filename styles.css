@@ -1094,3 +1094,47 @@ th.right, td.right { text-align: right; }
 @media (max-width: 380px) {
   .pr-form { display: none; }
 }
+
+/* ── Player avatars ─────────────────────────────────────────────────── */
+img.pr-avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0; display: block;
+  border: 1px solid var(--border);
+}
+.pp-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pp-avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  flex-shrink: 0; object-fit: cover;
+}
+.pp-initials {
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600;
+}
+.pp-photo-btn { flex-shrink: 0; }
+
+/* ── Avatars in champion badge + history cards ──────────────────────── */
+.avatar-initials {
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  font-weight: 600;
+}
+.champ-avatar-wrap { position: relative; flex-shrink: 0; }
+.champ-avatar {
+  width: 46px; height: 46px; border-radius: 50%;
+  object-fit: cover; display: block;
+}
+.champ-avatar.avatar-initials { display: flex; font-size: 15px; }
+.champ-trophy {
+  position: absolute; bottom: -5px; right: -7px;
+  font-size: 17px; line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.25));
+}
+.match-card .team-line { display: flex; align-items: center; gap: 6px; }
+.mc-avatars { display: inline-flex; flex-shrink: 0; }
+.mc-avatar {
+  width: 20px; height: 20px; border-radius: 50%;
+  object-fit: cover; font-size: 8px;
+  border: 1.5px solid var(--surface);
+  box-sizing: content-box;
+}
+.mc-avatar + .mc-avatar { margin-left: -7px; }
+.champion-badge { margin-top: 14px; margin-bottom: 4px; }
