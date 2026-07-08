@@ -614,6 +614,29 @@ function renderChampion() {
     </div>`;
 }
 
+// King of the Court badge — shown when viewing a specific weekend.
+// The king is computed over ALL matches up to and including that weekend,
+// so the crown carries continuity across weekends.
+function renderKingBadge() {
+  const box = document.getElementById('king-badge');
+  if (!box) return;
+  const isWeekend = currentFilter !== 'all' && !currentFilter.startsWith('season:');
+  if (!isWeekend) { box.className = 'champion-hidden'; box.innerHTML = ''; return; }
+  const upTo = sortedMatches().filter(m => m.date <= currentFilter);
+  const king = computeKingOfCourt(upTo);
+  if (!king) { box.className = 'champion-hidden'; box.innerHTML = ''; return; }
+  box.className = 'champion-badge king-badge';
+  box.innerHTML = `
+    <div class="champ-avatar-wrap">
+      ${playerAvatarHtml(king.king, 'champ-avatar')}
+      <span class="champ-trophy">👑</span>
+    </div>
+    <div>
+      <div class="label">King of the court</div>
+      <div class="name">${escapeHtml(king.king)} — held ${king.weekends} weekend${king.weekends === 1 ? '' : 's'}</div>
+    </div>`;
+}
+
 function renderLeaderboard() {
   const matches = filteredMatches();
   const s = statsFor(matches);
@@ -1038,47 +1061,114 @@ function renderPlayersPanel() {
     </div>`;
   }).join('');
   container.querySelectorAll('[data-avatar-player]').forEach(btn => {
-    btn.addEventListener('click', () => pickAvatar(btn.dataset.avatarPlayer, btn));
+    btn.addEventListener('click', () => pickAvatar(btn.dataset.avatarPlayer));
   });
 }
 
-function pickAvatar(player, btn) {
+function pickAvatar(player) {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.addEventListener('change', async () => {
+  input.addEventListener('change', () => {
     const file = input.files && input.files[0];
     if (!file) return;
-    if (!firebaseLoaded) { alert('Still connecting — try again in a moment.'); return; }
-    const originalText = btn.textContent;
-    btn.textContent = '…';
-    btn.disabled = true;
-    setStatus('Uploading photo…', '');
-    try {
-      const blob = await compressImage(file, 256, 0.85);
-      const id = 'avatar_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-      const path = `avatars/${id}.jpg`;
-      const sref = storageRef(storage, path);
-      await uploadBytes(sref, blob, { contentType: 'image/jpeg' });
-      const url = await getDownloadURL(sref);
-      // clean up the previous avatar file, if any
-      const prev = (state.playerAvatars || {})[player];
-      if (prev && prev.path) {
-        try { await deleteObject(storageRef(storage, prev.path)); } catch (e) { console.warn('Old avatar cleanup skipped:', e.message); }
-      }
-      if (!state.playerAvatars) state.playerAvatars = {};
-      state.playerAvatars[player] = { url, path };
-      await saveState();
-      renderPlayersPanel();
-      renderPowerRankings();
-    } catch (e) {
-      console.error('Avatar upload failed:', e);
-      alert('Photo upload failed: ' + e.message);
-      btn.textContent = originalText;
-      btn.disabled = false;
-    }
+    const reader = new FileReader();
+    reader.onerror = () => alert('Could not read the selected file.');
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = () => alert('Could not load that image — try a different one.');
+      img.onload = () => openCropModal(img, (dataUrl) => saveAvatar(player, dataUrl));
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
   });
   input.click();
+}
+
+async function saveAvatar(player, dataUrl) {
+  if (!firebaseLoaded) { alert('Still connecting — try again in a moment.'); return; }
+  try {
+    // clean up any old Storage-based avatar from the previous implementation
+    const prev = (state.playerAvatars || {})[player];
+    if (prev && prev.path) {
+      try { await deleteObject(storageRef(storage, prev.path)); } catch (e) { /* ignore */ }
+    }
+    if (!state.playerAvatars) state.playerAvatars = {};
+    state.playerAvatars[player] = dataUrl; // base64, lives in Firestore state
+    await saveState();
+    renderPlayersPanel();
+    renderPowerRankings();
+    renderChampion();
+    renderKingBadge();
+    renderHistory();
+  } catch (err) {
+    console.error('Avatar save failed:', err);
+    alert('Could not save photo: ' + err.message);
+  }
+}
+
+// Square crop modal: drag to position, slider to zoom
+function openCropModal(img, onSave) {
+  const overlay = document.createElement('div');
+  overlay.className = 'crop-overlay';
+  overlay.innerHTML = `
+    <div class="crop-box">
+      <div class="crop-title">Position &amp; zoom</div>
+      <canvas class="crop-canvas" width="280" height="280"></canvas>
+      <input type="range" class="crop-zoom" min="100" max="300" value="100" aria-label="Zoom">
+      <div class="crop-actions">
+        <button type="button" class="btn-small crop-cancel">Cancel</button>
+        <button type="button" class="btn-small crop-save">✓ Save photo</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const canvas = overlay.querySelector('.crop-canvas');
+  const ctx = canvas.getContext('2d');
+  const V = 280;
+  const base = Math.max(V / img.width, V / img.height); // cover the square
+  let zoom = 1, offX = 0, offY = 0;
+
+  function clampOffsets() {
+    const w = img.width * base * zoom, h = img.height * base * zoom;
+    const maxX = Math.max(0, (w - V) / 2), maxY = Math.max(0, (h - V) / 2);
+    offX = Math.min(maxX, Math.max(-maxX, offX));
+    offY = Math.min(maxY, Math.max(-maxY, offY));
+  }
+  function draw(c = ctx, size = V) {
+    const s = size / V;
+    const w = img.width * base * zoom * s, h = img.height * base * zoom * s;
+    c.fillStyle = '#000';
+    c.fillRect(0, 0, size, size);
+    c.drawImage(img, (size - w) / 2 + offX * s, (size - h) / 2 + offY * s, w, h);
+  }
+  draw();
+
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    offX += e.clientX - lastX; offY += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    clampOffsets(); draw();
+  });
+  canvas.addEventListener('pointerup', () => { dragging = false; });
+  canvas.addEventListener('pointercancel', () => { dragging = false; });
+
+  overlay.querySelector('.crop-zoom').addEventListener('input', (e) => {
+    zoom = parseInt(e.target.value, 10) / 100;
+    clampOffsets(); draw();
+  });
+  overlay.querySelector('.crop-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('.crop-save').addEventListener('click', () => {
+    const out = document.createElement('canvas');
+    out.width = 256; out.height = 256;
+    draw(out.getContext('2d'), 256);
+    overlay.remove();
+    onSave(out.toDataURL('image/jpeg', 0.85));
+  });
 }
 
 function savePlayers() {
@@ -2775,6 +2865,7 @@ function renderAll() {
   renderWeekendCoordinator();
   renderSummary();
   renderChampion();
+  renderKingBadge();
   renderHistory();
   renderChemistry();
   renderPlayersPanel();
@@ -2809,6 +2900,7 @@ document.getElementById('filter-weekend')?.addEventListener('change', (e) => {
   renderSeasonBanner();
   renderSummary();
   renderChampion();
+  renderKingBadge();
   renderCharts();
   setTimeout(() => generateTicker(), 100);
 });
