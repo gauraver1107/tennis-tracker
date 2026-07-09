@@ -1,4 +1,6 @@
+// ═══ VERSION: v9-player-profiles · 2026-07-09 ═══
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+console.log('NJ Tennis Tracker — v9-player-profiles');
 import {
   getFirestore, doc, setDoc, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -512,7 +514,7 @@ function renderPowerRankings() {
     const isKing = king && king.king === p;
     const avatarHtml = playerAvatarHtml(p, 'pr-avatar');
     return `
-      <div class="pr-row ${isKing ? 'pr-king' : ''}">
+      <div class="pr-row ${isKing ? 'pr-king' : ''}" data-profile="${escapeHtml(p)}" role="button" tabindex="0">
         <span class="pr-rank">${rank}</span>
         ${moveHtml}
         ${avatarHtml}
@@ -555,6 +557,173 @@ function renderPowerRankings() {
       ${rows}
       ${watchCards.length ? `<div class="rw-label">Rivalry watch</div><div class="rw-grid">${watchCards.join('')}</div>` : ''}
     </div>`;
+
+  if (!box.dataset.profileWired) {
+    box.dataset.profileWired = '1';
+    box.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-profile]');
+      if (row) openPlayerProfile(row.dataset.profile);
+    });
+    box.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const row = e.target.closest('[data-profile]');
+      if (row) { e.preventDefault(); openPlayerProfile(row.dataset.profile); }
+    });
+  }
+}
+
+// ── Player profile ────────────────────────────────────────────────────────
+function playerProfileData(p) {
+  const all = sortedMatches();
+  const mine = all.filter(m => m.teamA.includes(p) || m.teamB.includes(p));
+  let wins = 0, losses = 0, setsW = 0, setsL = 0, gamesW = 0, gamesL = 0;
+  let bestWinStreak = 0, worstLossStreak = 0, run = 0, runType = null;
+  const partners = {}, opponents = {};
+
+  mine.forEach(m => {
+    const inA = m.teamA.includes(p);
+    const won = (m.winner === 'A') === inA;
+    won ? wins++ : losses++;
+    (m.sets || []).forEach(s => {
+      const pg = inA ? s.a : s.b, og = inA ? s.b : s.a;
+      gamesW += pg; gamesL += og;
+      if (pg > og) setsW++; else if (og > pg) setsL++;
+    });
+    // streak runs
+    const t = won ? 'W' : 'L';
+    if (t === runType) run++; else { runType = t; run = 1; }
+    if (t === 'W') bestWinStreak = Math.max(bestWinStreak, run);
+    else worstLossStreak = Math.max(worstLossStreak, run);
+    // partners & opponents
+    const myTeam = inA ? m.teamA : m.teamB;
+    const oppTeam = inA ? m.teamB : m.teamA;
+    myTeam.filter(x => x !== p).forEach(x => {
+      if (!partners[x]) partners[x] = { w: 0, l: 0 };
+      won ? partners[x].w++ : partners[x].l++;
+    });
+    oppTeam.forEach(x => {
+      if (!opponents[x]) opponents[x] = { w: 0, l: 0 };
+      won ? opponents[x].w++ : opponents[x].l++;
+    });
+  });
+
+  // Career ELO trajectory (full simulation; record p's rating after their matches)
+  const elo = {};
+  state.players.forEach(x => { elo[x] = ELO_START; });
+  const series = [ELO_START];
+  let peak = ELO_START, peakDate = null;
+  all.forEach(m => {
+    const teamAvg = t => t.reduce((a, x) => a + (elo[x] ?? ELO_START), 0) / t.length;
+    const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
+    const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
+    const sA = m.winner === 'A' ? 1 : 0;
+    const dA = ELO_K * (sA - expA), dB = ELO_K * ((1 - sA) - (1 - expA));
+    m.teamA.forEach(x => { elo[x] = (elo[x] ?? ELO_START) + dA; });
+    m.teamB.forEach(x => { elo[x] = (elo[x] ?? ELO_START) + dB; });
+    if (m.teamA.includes(p) || m.teamB.includes(p)) {
+      const v = Math.round(elo[p]);
+      series.push(v);
+      if (v > peak) { peak = v; peakDate = m.date; }
+    }
+  });
+
+  const pick = (obj, best) => Object.entries(obj)
+    .map(([name, r]) => ({ name, ...r, total: r.w + r.l, pct: (r.w + r.l) ? r.w / (r.w + r.l) : 0 }))
+    .filter(r => r.total >= 3)
+    .sort((a, b) => best ? (b.pct - a.pct || b.total - a.total) : (a.pct - b.pct || b.total - a.total))[0] || null;
+
+  const { streak, streakType } = playerFormAndStreak(all, p);
+  return {
+    mine, wins, losses, setsW, setsL, gamesW, gamesL,
+    bestWinStreak, worstLossStreak,
+    currentStreak: streak, currentStreakType: streakType,
+    weekends: new Set(mine.map(m => m.date)).size,
+    eloNow: Math.round(elo[p] ?? ELO_START), series, peak, peakDate,
+    bestPartner: pick(partners, true),
+    toughestRival: pick(opponents, false)
+  };
+}
+
+function eloSparklineSvg(series, color) {
+  if (series.length < 2) return '';
+  const W = 300, H = 64, P = 4;
+  const min = Math.min(...series, ELO_START), max = Math.max(...series, ELO_START);
+  const range = (max - min) || 1;
+  const pts = series.map((v, i) =>
+    `${(P + (W - 2 * P) * i / (series.length - 1)).toFixed(1)},${(H - P - (H - 2 * P) * (v - min) / range).toFixed(1)}`
+  ).join(' ');
+  const baseY = (H - P - (H - 2 * P) * (ELO_START - min) / range).toFixed(1);
+  return `<svg viewBox="0 0 ${W} ${H}" class="prof-spark" preserveAspectRatio="none">
+    <line x1="0" y1="${baseY}" x2="${W}" y2="${baseY}" stroke="currentColor" stroke-opacity="0.25" stroke-dasharray="4 4"/>
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+function openPlayerProfile(p) {
+  document.querySelector('.profile-overlay')?.remove();
+  const d = playerProfileData(p);
+  if (!d.mine.length) return;
+  const pct = Math.round((d.wins / (d.wins + d.losses)) * 100);
+  const all = filteredMatches(); // rank within current view
+  const eloData = computeElo();
+  const played = playedCounts(all);
+  const order = state.players.filter(x => played[x] > 0)
+    .sort((a, b) => (eloData.current[b] ?? ELO_START) - (eloData.current[a] ?? ELO_START));
+  const rank = order.indexOf(p) + 1;
+  const streakChip = d.currentStreakType
+    ? `<span class="prof-chip ${d.currentStreakType === 'W' ? 'chip-w' : 'chip-l'}">${d.currentStreakType === 'W' ? '🔥 Won' : '❄️ Lost'} last ${d.currentStreak}</span>`
+    : '';
+
+  const recent = d.mine.slice(-8).reverse().map(m => {
+    const inA = m.teamA.includes(p);
+    const won = (m.winner === 'A') === inA;
+    const partner = (inA ? m.teamA : m.teamB).filter(x => x !== p).join(' & ') || '—';
+    const opp = (inA ? m.teamB : m.teamA).join(' & ');
+    const score = (m.sets || []).map(s => `${inA ? s.a : s.b}-${inA ? s.b : s.a}`).join(', ');
+    return `
+      <div class="prof-match">
+        <span class="prof-chip ${won ? 'chip-w' : 'chip-l'}">${won ? 'W' : 'L'}</span>
+        <div class="prof-match-info">
+          <div>with ${escapeHtml(partner)} vs ${escapeHtml(opp)}</div>
+          <div class="prof-match-meta">${formatDate(m.date)} · ${escapeHtml(score)}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  const stat = (v, k) => `<div class="prof-stat"><div class="v">${v}</div><div class="k">${k}</div></div>`;
+  const overlay = document.createElement('div');
+  overlay.className = 'profile-overlay';
+  overlay.innerHTML = `
+    <div class="profile-box">
+      <button class="prof-close" aria-label="Close">✕</button>
+      <div class="prof-header">
+        ${playerAvatarHtml(p, 'prof-avatar')}
+        <div>
+          <div class="prof-name">${escapeHtml(p)}</div>
+          <div class="prof-subline">${rank > 0 ? `#${rank} in current view · ` : ''}ELO ${d.eloNow}</div>
+          ${streakChip}
+        </div>
+      </div>
+      <div class="prof-grid">
+        ${stat(`${d.wins}–${d.losses}`, 'Career W–L')}
+        ${stat(`${pct}%`, 'Win rate')}
+        ${stat(`${d.setsW}–${d.setsL}`, 'Sets won')}
+        ${stat(`${d.gamesW}–${d.gamesL}`, 'Games won')}
+        ${stat(d.bestWinStreak, 'Best win streak')}
+        ${stat(`${d.peak}`, d.peakDate ? `Peak ELO · ${formatDate(d.peakDate)}` : 'Peak ELO')}
+        ${stat(d.mine.length, 'Matches')}
+        ${stat(d.weekends, 'Weekends')}
+      </div>
+      ${d.bestPartner ? `<div class="prof-line">🤝 Best partner: <strong>${escapeHtml(d.bestPartner.name)}</strong> (${d.bestPartner.w}–${d.bestPartner.l} together)</div>` : ''}
+      ${d.toughestRival ? `<div class="prof-line">⚔️ Toughest rival: <strong>${escapeHtml(d.toughestRival.name)}</strong> (${d.toughestRival.w}–${d.toughestRival.l} against)</div>` : ''}
+      <div class="prof-section">Career ELO</div>
+      ${eloSparklineSvg(d.series, playerColor(p))}
+      <div class="prof-section">Recent matches</div>
+      ${recent}
+    </div>`;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('.prof-close').addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
 }
 
 function renderSummary() {
