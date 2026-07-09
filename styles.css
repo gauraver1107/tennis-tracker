@@ -1173,3 +1173,63 @@ img.pr-avatar {
 .crop-canvas:active { cursor: grabbing; }
 .crop-zoom { width: 100%; }
 .crop-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ── Player profile modal ───────────────────────────────────────────── */
+.pr-row[data-profile] { cursor: pointer; }
+.pr-row[data-profile]:hover { border-color: var(--accent); }
+.profile-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.profile-box {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  max-width: 400px; width: 100%;
+  max-height: 85vh; overflow-y: auto;
+  position: relative;
+}
+.prof-close {
+  position: absolute; top: 10px; right: 10px;
+  background: none; border: none; font-size: 16px;
+  color: var(--text-muted); cursor: pointer; padding: 6px;
+}
+.prof-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.prof-avatar {
+  width: 56px; height: 56px; border-radius: 50%;
+  object-fit: cover; flex-shrink: 0;
+}
+.prof-avatar.avatar-initials { display: flex; font-size: 18px; }
+.prof-name { font-size: 18px; font-weight: 600; }
+.prof-subline { font-size: 12px; color: var(--text-muted); margin: 2px 0 4px; }
+.prof-chip {
+  display: inline-block; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px;
+}
+.chip-w { background: rgba(99,153,34,0.15); color: #3B6D11; }
+.chip-l { background: rgba(226,75,74,0.15); color: #A32D2D; }
+@media (prefers-color-scheme: dark) {
+  .chip-w { color: #97C459; }
+  .chip-l { color: #F09595; }
+}
+.prof-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px; margin-bottom: 12px;
+}
+@media (max-width: 380px) { .prof-grid { grid-template-columns: repeat(2, 1fr); } }
+.prof-stat { background: var(--surface-2); border-radius: var(--radius); padding: 8px 6px; text-align: center; }
+.prof-stat .v { font-size: 15px; font-weight: 600; }
+.prof-stat .k { font-size: 10px; color: var(--text-muted); margin-top: 2px; line-height: 1.2; }
+.prof-line { font-size: 13px; margin-bottom: 6px; }
+.prof-section {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-dim); margin: 12px 0 6px;
+}
+.prof-spark { width: 100%; height: 64px; display: block; color: var(--text-muted); }
+.prof-match { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.prof-match:last-child { border-bottom: none; }
+.prof-match .prof-chip { width: 22px; text-align: center; flex-shrink: 0; padding: 2px 0; }
+.prof-match-info { font-size: 12.5px; min-width: 0; }
+.prof-match-meta { font-size: 11px; color: var(--text-muted); }
