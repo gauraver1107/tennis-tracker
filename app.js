@@ -15,7 +15,7 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const DOC_REF = doc(db, 'tennis', 'shared');
 
-const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang','Manjeet'];
+const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang','Manjeet','Shreyansh'];
 const ELO_START = 1200;
 const ELO_K = 32;
 
@@ -308,7 +308,7 @@ function computePairStreaks() {
 }
 
 // ── Power rankings ────────────────────────────────────────────────────────
-const PLAYER_COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27','#14B8A6'];
+const PLAYER_COLORS = ['#378ADD','#1D9E75','#D85A30','#D4537E','#7F77DD','#EF9F27','#14B8A6','#B45FC9'];
 
 function playerColor(name) {
   const idx = state.players.indexOf(name);
@@ -1213,7 +1213,7 @@ function playerAvatarHtml(p, cls) {
 
 function renderPlayersPanel() {
   const container = document.getElementById('player-inputs');
-  const MAX = 7;
+  const MAX = 8;
   const slots = [...state.players];
   while (slots.length < MAX) slots.push('');
   container.innerHTML = slots.map((p, i) => {
@@ -1364,7 +1364,7 @@ function savePlayers() {
   const next = [];
   inputs.forEach(inp => { const v = inp.value.trim(); if (v) next.push(v); });
   if (next.length < 5) { alert('You need at least 5 player names.'); return; }
-  if (next.length > 7) { alert('Maximum 7 players supported.'); return; }
+  if (next.length > 8) { alert('Maximum 8 players supported.'); return; }
   if (new Set(next).size !== next.length) { alert('Player names must be unique.'); return; }
   const rename = {};
   state.players.forEach((old, i) => { if (next[i]) rename[old] = next[i]; });
