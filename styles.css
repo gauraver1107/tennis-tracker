@@ -557,27 +557,34 @@ th.right, td.right { text-align: right; }
   margin-bottom: 12px;
   border: 1px solid transparent;
 }
-.wind-card.wind-favourable   { background: rgba(29,158,117,0.09); border-color: rgba(29,158,117,0.25); }
-.wind-card.wind-unfavourable { background: rgba(163,45,45,0.10);  border-color: rgba(163,45,45,0.3); }
+.wind-card.wind-green  { background: rgba(29,158,117,0.09); border-color: rgba(29,158,117,0.25); }
+.wind-card.wind-yellow { background: rgba(245,200,66,0.18); border-color: rgba(214,168,0,0.45); }
+.wind-card.wind-orange { background: rgba(232,116,42,0.15); border-color: rgba(232,116,42,0.5); }
 .wind-emoji { font-size: 26px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
 .wind-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
 .wind-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.wind-card.wind-unfavourable .wind-title { color: var(--danger); }
+.wind-card.wind-yellow .wind-title { color: #7A5F00; }
+.wind-card.wind-orange .wind-title { color: #B2470A; }
 .wind-num { font-size: 16px; font-weight: 700; }
 .wind-advice { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
 
 /* - Wind banner on the weekend coordinator card - only shown when windy - */
 .wc-wind-banner {
-  background: rgba(163,45,45,0.1);
-  border: 1px solid rgba(163,45,45,0.3);
-  color: var(--danger);
+  border: 1px solid transparent;
   border-radius: var(--radius-lg);
   padding: 8px 12px;
   font-size: 12px;
   font-weight: 500;
   margin-bottom: 10px;
 }
-.wc-h-wind.windy { color: var(--danger); font-weight: 700; }
+.wc-wind-banner.yellow { background: rgba(245,200,66,0.18); border-color: rgba(214,168,0,0.45); color: #7A5F00; }
+.wc-wind-banner.orange { background: rgba(232,116,42,0.15); border-color: rgba(232,116,42,0.5);  color: #B2470A; }
+.wc-h-wind.yellow, .wind-text-yellow { color: #8A6A00; font-weight: 700; }
+.wc-h-wind.orange, .wind-text-orange { color: #C24E0B; font-weight: 700; }
+@media (prefers-color-scheme: dark) {
+  .wind-card.wind-yellow .wind-title, .wc-wind-banner.yellow, .wc-h-wind.yellow, .wind-text-yellow { color: #F2D057; }
+  .wind-card.wind-orange .wind-title, .wc-wind-banner.orange, .wc-h-wind.orange, .wind-text-orange { color: #F5A06A; }
+}
 
 .forecast-grid {
   display: grid;
