@@ -1,6 +1,6 @@
-// ═══ VERSION: v11-single-list · 2026-10-07 ═══
+// ═══ VERSION: v12-wind-tiers · 2026-10-07 ═══
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-console.log('NJ Tennis Tracker — v11-single-list');
+console.log('NJ Tennis Tracker — v12-wind-tiers');
 import {
   getFirestore, doc, setDoc, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -2196,10 +2196,19 @@ async function fetchWeather(lat, lon) {
 const MORNING_START = 6;
 const MORNING_END = 12;
 // Wind data comes back from Open-Meteo in km/h; the group thinks in mph, so
-// we convert for the threshold check and for anything we display as a
-// dedicated wind warning (the rest of the app's km/h labels stay unchanged).
-const WIND_WARN_MPH = 8;
+// wind warnings convert to mph (the rest of the app's km/h labels stay unchanged).
+// Tiers use the PEAK wind in the 6 AM - 12 PM window:
+//   green  = up to 7 mph   (under 5 is calm, 5-7 a light breeze - both fine)
+//   yellow = above 7 mph   (breezy: playable, expect some drift)
+//   orange = above 10 mph  (not favourable: consider booking indoor)
+const WIND_YELLOW_MPH = 7;
+const WIND_ORANGE_MPH = 10;
 function kmhToMph(kmh) { return kmh * 0.621371; }
+function windTier(mph) {
+  if (mph > WIND_ORANGE_MPH) return 'orange';
+  if (mph > WIND_YELLOW_MPH) return 'yellow';
+  return 'green';
+}
 
 function getMorningHours(data, dateStr) {
   const times = data.hourly.time;
@@ -2247,32 +2256,33 @@ function renderUVCard(hours, dailyUvMax) {
   return '<div class="uv-card uv-' + info.rank + '"><div class="uv-left"><div class="uv-emoji">' + info.emoji + '</div><div><div class="uv-label">UV Index 6 AM-12 PM</div><div class="uv-title">' + info.level + ' <span class="uv-num">' + peakUV.toFixed(1) + '</span>' + (peakHour ? ' <span class="uv-peak-time">peaks ' + peakHour.label + '</span>' : '') + '</div><div class="uv-advice">' + info.text + '</div></div></div><div class="uv-bar-wrap"><div class="uv-track"><div class="uv-fill" style="width:' + pct + '%;background:' + info.color + '"></div></div><div class="uv-zones"><span style="color:#1D9E75">Low 0</span><span style="color:#F5C842">Mod 3</span><span style="color:#EF9F27">High 6</span><span style="color:#D85A30">8+</span><span style="color:#7B2FBE">11+</span></div></div></div>';
 }
 
-// ── Wind warning card ───────────────────────────────────────────────────
-// Two-state (favourable/not favourable) rather than UV's graduated scale,
-// since the group only cares about one line: "is it too windy to play".
+// ── Wind card ───────────────────────────────────────────────────────────
+// Three tiers (green / yellow / orange) on the peak wind in the morning window.
 function windStatus(hours) {
   if (!hours || hours.length === 0) return null;
   const peakHour = hours.reduce((b, h) => h.wind > b.wind ? h : b, hours[0]);
   const peakMph = kmhToMph(peakHour.wind);
-  const unfavourable = peakMph > WIND_WARN_MPH;
-  return { peakMph, peakHour, unfavourable };
+  return { peakMph, peakHour, tier: windTier(peakMph) };
 }
+const WIND_TIER_COPY = {
+  green:  { emoji: '🍃', title: 'Wind favourable',
+            advice: (w) => `Peak ${w.peakMph.toFixed(1)} mph at ${w.peakHour.label} — calm enough for normal play.` },
+  yellow: { emoji: '🌬️', title: 'Breezy',
+            advice: (w) => `Peak ${w.peakMph.toFixed(1)} mph at ${w.peakHour.label} — playable, but expect some drift on serves and lobs.` },
+  orange: { emoji: '💨', title: 'Wind not favourable',
+            advice: (w) => `Peak ${w.peakMph.toFixed(1)} mph at ${w.peakHour.label} — above ${WIND_ORANGE_MPH} mph. Strong drift; consider booking indoor.` }
+};
 function renderWindCard(hours) {
   const w = windStatus(hours);
   if (!w) return '';
-  const rank = w.unfavourable ? 'unfavourable' : 'favourable';
-  const emoji = w.unfavourable ? '🌬️' : '🍃';
-  const title = w.unfavourable ? 'Wind not favourable' : 'Wind favourable';
-  const advice = w.unfavourable
-    ? `Peak ${w.peakMph.toFixed(1)} mph at ${w.peakHour.label} — above the ${WIND_WARN_MPH} mph comfort line. Expect drift on serves and lobs.`
-    : `Peak ${w.peakMph.toFixed(1)} mph at ${w.peakHour.label} — calm enough for normal play.`;
+  const copy = WIND_TIER_COPY[w.tier];
   return `
-    <div class="wind-card wind-${rank}">
-      <div class="wind-emoji">${emoji}</div>
+    <div class="wind-card wind-${w.tier}">
+      <div class="wind-emoji">${copy.emoji}</div>
       <div>
         <div class="wind-label">Wind · 6 AM – 12 PM</div>
-        <div class="wind-title">${title} <span class="wind-num">${w.peakMph.toFixed(1)} mph</span></div>
-        <div class="wind-advice">${advice}</div>
+        <div class="wind-title">${copy.title} <span class="wind-num">${w.peakMph.toFixed(1)} mph</span></div>
+        <div class="wind-advice">${copy.advice(w)}</div>
       </div>
     </div>`;
 }
@@ -2608,8 +2618,8 @@ async function renderWeekendCoordinator() {
         <div class="wc-hour-grid">
           ${morningHours.map(h => {
             const isBest = bestWin && (h.label === bestWin.startLabel || h.label === bestWin.midLabel || h.label === bestWin.endLabel);
-            const hourWindy = kmhToMph(h.wind) > WIND_WARN_MPH;
-            const isWarn = !isBest && (h.rain >= 30 || hourWindy);
+            const hourTier = windTier(kmhToMph(h.wind));
+            const isWarn = !isBest && (h.rain >= 30 || hourTier === 'orange');
             const cls = isBest ? 'wc-hour-cell best' : isWarn ? 'wc-hour-cell warn' : 'wc-hour-cell';
             return `
               <div class="${cls}">
@@ -2617,7 +2627,7 @@ async function renderWeekendCoordinator() {
                 <div class="wc-h-icon">${weatherIcon(h.code)}</div>
                 <div class="wc-h-temp">${h.temp}°C</div>
                 <div class="wc-h-rain">💧${h.rain}%</div>
-                <div class="wc-h-wind${hourWindy ? ' windy' : ''}">💨${kmhToMph(h.wind).toFixed(0)}mph</div>
+                <div class="wc-h-wind${hourTier !== 'green' ? ' ' + hourTier : ''}">💨${kmhToMph(h.wind).toFixed(0)}mph</div>
                 ${h.uv != null ? `<div class="wc-h-uv" style="color:${uvDotColor(h.uv)}">UV ${h.uv.toFixed(0)}</div>` : ''}
                 ${isBest ? '<div class="wc-best-badge">Best</div>' : ''}
               </div>`;
@@ -2626,9 +2636,10 @@ async function renderWeekendCoordinator() {
 
       const windInfo = windStatus(morningHours);
       const peakWindMph = windInfo ? windInfo.peakMph : kmhToMph(peakWind);
-      const windBannerHtml = windInfo && windInfo.unfavourable ? `
-        <div class="wc-wind-banner">
-          🌬️ <strong>Wind not favourable</strong> — up to ${peakWindMph.toFixed(1)} mph around ${windInfo.peakHour.label}
+      const peakWindTier = windTier(peakWindMph);
+      const windBannerHtml = windInfo && windInfo.tier !== 'green' ? `
+        <div class="wc-wind-banner ${windInfo.tier}">
+          ${WIND_TIER_COPY[windInfo.tier].emoji} <strong>${WIND_TIER_COPY[windInfo.tier].title}</strong> — up to ${peakWindMph.toFixed(1)} mph around ${windInfo.peakHour.label}${windInfo.tier === 'orange' ? ' · consider indoor' : ''}
         </div>` : '';
 
       weatherColHtml = `
@@ -2648,7 +2659,7 @@ async function renderWeekendCoordinator() {
               </div>
               <div class="wc-stat">
                 <div class="wc-stat-label">Peak wind</div>
-                <div class="wc-stat-value" style="${peakWindMph > WIND_WARN_MPH ? 'color:var(--danger)' : ''}">💨 ${peakWindMph.toFixed(1)} mph</div>
+                <div class="wc-stat-value${peakWindTier !== 'green' ? ' wind-text-' + peakWindTier : ''}">💨 ${peakWindMph.toFixed(1)} mph</div>
               </div>
               ${sunrise ? `
               <div class="wc-stat">
