@@ -1146,12 +1146,6 @@ th.right, td.right { text-align: right; }
 .pr-elo { font-size: 13px; font-weight: 600; text-align: right; }
 .pr-elo.provisional { color: var(--text-muted); font-weight: 500; }
 .pr-played { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
-.pr-building-label {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--text-dim); margin: 14px 0 8px; padding-top: 10px;
-  border-top: 1px dashed var(--border);
-}
-.pr-building-label span { text-transform: none; letter-spacing: 0; }
 .rw-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-dim); margin: 12px 0 6px;
