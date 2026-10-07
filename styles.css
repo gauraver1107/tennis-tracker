@@ -174,7 +174,7 @@ button:active { transform: scale(0.98); }
   gap: 10px;
   margin-bottom: 16px;
 }
-/* â”€â”€ AI Ticker â”€â”€ */
+/* - AI Ticker - */
 .ticker-wrap {
   display: flex;
   align-items: center;
@@ -518,7 +518,7 @@ th.right, td.right { text-align: right; }
   font-weight: 500;
 }
 
-/* â”€â”€ UV Index card â”€â”€ */
+/* - UV Index card - */
 .uv-card {
   display: flex;
   align-items: center;
@@ -547,7 +547,7 @@ th.right, td.right { text-align: right; }
 .uv-fill  { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
 .uv-zones { display: flex; justify-content: space-between; font-size: 9px; font-weight: 600; }
 
-/* â”€â”€ Wind warning card (Weather tab) â€” two-state, mirrors UV card layout â”€â”€ */
+/* - Wind warning card (Weather tab) - two-state, mirrors UV card layout - */
 .wind-card {
   display: flex;
   align-items: flex-start;
@@ -566,7 +566,7 @@ th.right, td.right { text-align: right; }
 .wind-num { font-size: 16px; font-weight: 700; }
 .wind-advice { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
 
-/* â”€â”€ Wind banner on the weekend coordinator card â€” only shown when windy â”€â”€ */
+/* - Wind banner on the weekend coordinator card - only shown when windy - */
 .wc-wind-banner {
   background: rgba(163,45,45,0.1);
   border: 1px solid rgba(163,45,45,0.3);
@@ -998,7 +998,7 @@ th.right, td.right { text-align: right; }
   padding: 16px;
 }
 
-/* â”€â”€ Voice entry â”€â”€ */
+/* - Voice entry - */
 .voice-card { border: 1px solid rgba(29,158,117,0.3) !important; background: rgba(29,158,117,0.04) !important; }
 .voice-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .voice-title { font-size: 15px; font-weight: 600; }
@@ -1050,7 +1050,7 @@ th.right, td.right { text-align: right; }
 .voice-examples { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
 .voice-examples em { color: var(--text); font-style: normal; }
 
-/* â”€â”€ Vote share toast â”€â”€ */
+/* - Vote share toast - */
 .vote-share-toast {
   position: fixed;
   bottom: 20px; left: 50%;
@@ -1097,7 +1097,7 @@ th.right, td.right { text-align: right; }
   .rotation-vs { display: none; }
 }
 
-/* â”€â”€ Power rankings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* - Power rankings - */
 .pr-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1142,9 +1142,16 @@ th.right, td.right { text-align: right; }
 .pr-dot { width: 9px; height: 9px; border-radius: 50%; }
 .pr-dot.w { background: #639922; }
 .pr-dot.l { background: #E24B4A; }
-.pr-elo { font-size: 13px; font-weight: 600; width: 42px; text-align: right; flex-shrink: 0; }
-.pr-elo.provisional { color: var(--text-muted); font-weight: 500; opacity: 0.75; }
-.pr-elo.provisional::after { content: ' â³'; font-size: 10px; }
+.pr-elo-wrap { display: flex; flex-direction: column; align-items: flex-end; width: 56px; flex-shrink: 0; line-height: 1.2; }
+.pr-elo { font-size: 13px; font-weight: 600; text-align: right; }
+.pr-elo.provisional { color: var(--text-muted); font-weight: 500; }
+.pr-played { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.pr-building-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-dim); margin: 14px 0 8px; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.pr-building-label span { text-transform: none; letter-spacing: 0; }
 .rw-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-dim); margin: 12px 0 6px;
@@ -1158,7 +1165,7 @@ th.right, td.right { text-align: right; }
   .pr-form { display: none; }
 }
 
-/* â”€â”€ Player avatars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* - Player avatars - */
 img.pr-avatar {
   width: 30px; height: 30px; border-radius: 50%;
   object-fit: cover; flex-shrink: 0; display: block;
@@ -1175,7 +1182,7 @@ img.pr-avatar {
 }
 .pp-photo-btn { flex-shrink: 0; }
 
-/* â”€â”€ Avatars in champion badge + history cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* - Avatars in champion badge + history cards - */
 .avatar-initials {
   color: #fff; display: flex; align-items: center; justify-content: center;
   font-weight: 600;
@@ -1202,7 +1209,7 @@ img.pr-avatar {
 .mc-avatar + .mc-avatar { margin-left: -7px; }
 .champion-badge { margin-top: 14px; margin-bottom: 4px; }
 
-/* â”€â”€ Badge row + king badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* - Badge row + king badge - */
 .badge-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -1212,7 +1219,7 @@ img.pr-avatar {
 .badge-row .champion-badge { margin: 0; }
 .king-badge { background: rgba(239,159,39,0.12); border-color: rgba(239,159,39,0.45); }
 
-/* â”€â”€ Crop modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* - Crop modal - */
 .crop-overlay {
   position: fixed; inset: 0; z-index: 1000;
   background: rgba(0,0,0,0.55);
@@ -1237,7 +1244,7 @@ img.pr-avatar {
 .crop-zoom { width: 100%; }
 .crop-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* â”€â”€ Player profile modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* - Player profile modal - */
 .pr-row[data-profile] { cursor: pointer; }
 .pr-row[data-profile]:hover { border-color: var(--accent); }
 .profile-overlay {
@@ -1296,3 +1303,13 @@ img.pr-avatar {
 .prof-match .prof-chip { width: 22px; text-align: center; flex-shrink: 0; padding: 2px 0; }
 .prof-match-info { font-size: 12.5px; min-width: 0; }
 .prof-match-meta { font-size: 11px; color: var(--text-muted); }
+
+/* Player profile: This season / Career toggle */
+.prof-scope { display: flex; gap: 6px; margin-bottom: 12px; }
+.prof-scope-btn {
+  flex: 1; padding: 6px 10px; font-size: 12px; font-weight: 600; font-family: inherit;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text-muted); cursor: pointer;
+}
+.prof-scope-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.prof-scope-btn:disabled { opacity: 0.4; cursor: not-allowed; }
