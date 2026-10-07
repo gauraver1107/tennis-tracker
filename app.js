@@ -18,6 +18,11 @@ const DOC_REF = doc(db, 'tennis', 'shared');
 const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang','Manjeet','Shreyansh'];
 const ELO_START = 1200;
 const ELO_K = 32;
+// Participation ramp — a player's rating only counts in full once they've
+// played this many matches in the current season/view. Below that, the
+// distance from 1200 is scaled down proportionally, so a low-volume player
+// can't sit at an inflated (or deflated) rating on the back of 1-2 sessions.
+const MIN_MATCHES_FOR_FULL_ELO = 20;
 
 // ── Season definitions (auto-detected from date) ─────────────────────────
 // SS = Spring/Summer: Mar 1 – Aug 31
@@ -229,33 +234,55 @@ function renderSeasonBanner() {
 }
 
 function computeElo(seasonId) {
-  const elo = {};
-  state.players.forEach(p => { elo[p] = ELO_START; });
+  const rawElo = {};
+  state.players.forEach(p => { rawElo[p] = ELO_START; });
+  const matchCount = {};
+  state.players.forEach(p => { matchCount[p] = 0; });
   const history = {};
   state.players.forEach(p => { history[p] = [{ n: 0, rating: ELO_START }]; });
   // Use matches for the current filter (season-aware) — hard reset to 1200 each season
   const matches = seasonId
     ? sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId)
     : filteredMatches();
+
+  // Adjusted rating at any point in time: distance from 1200 scaled by how
+  // many matches that player has played so far, capped once they cross
+  // MIN_MATCHES_FOR_FULL_ELO. This also makes the history line visually show
+  // the "ramp" — early points hug 1200, later points reflect full strength.
+  const adjusted = (player) => {
+    const raw = rawElo[player] ?? ELO_START;
+    const n = matchCount[player] ?? 0;
+    const factor = Math.min(1, n / MIN_MATCHES_FOR_FULL_ELO);
+    return ELO_START + (raw - ELO_START) * factor;
+  };
+
   matches.forEach((m, idx) => {
-    const teamAvg = (team) => team.reduce((acc, p) => acc + (elo[p] ?? ELO_START), 0) / team.length;
+    const teamAvg = (team) => team.reduce((acc, p) => acc + (rawElo[p] ?? ELO_START), 0) / team.length;
     const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
     const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
     const scoreA = m.winner === 'A' ? 1 : 0;
     const deltaA = ELO_K * (scoreA - expA);
     const deltaB = ELO_K * ((1 - scoreA) - (1 - expA));
     m.teamA.forEach(p => {
-      elo[p] = (elo[p] ?? ELO_START) + deltaA;
-      history[p].push({ n: idx + 1, rating: Math.round(elo[p]) });
+      rawElo[p] = (rawElo[p] ?? ELO_START) + deltaA;
+      matchCount[p] = (matchCount[p] ?? 0) + 1;
+      history[p].push({ n: idx + 1, rating: Math.round(adjusted(p)) });
     });
     m.teamB.forEach(p => {
-      elo[p] = (elo[p] ?? ELO_START) + deltaB;
-      history[p].push({ n: idx + 1, rating: Math.round(elo[p]) });
+      rawElo[p] = (rawElo[p] ?? ELO_START) + deltaB;
+      matchCount[p] = (matchCount[p] ?? 0) + 1;
+      history[p].push({ n: idx + 1, rating: Math.round(adjusted(p)) });
     });
   });
-  const current = {};
-  state.players.forEach(p => { current[p] = Math.round(elo[p] ?? ELO_START); });
-  return { current, history };
+
+  const current = {}, raw = {}, matchesPlayed = {}, qualified = {};
+  state.players.forEach(p => {
+    matchesPlayed[p] = matchCount[p] ?? 0;
+    raw[p] = Math.round(rawElo[p] ?? ELO_START);
+    current[p] = Math.round(adjusted(p));
+    qualified[p] = matchesPlayed[p] >= MIN_MATCHES_FOR_FULL_ELO;
+  });
+  return { current, raw, history, matchesPlayed, qualified };
 }
 
 function statsFor(matches) {
@@ -448,6 +475,11 @@ function playerSubtitle(p, ctx) {
   if (king && king.king === p) {
     return `King of the court · ${king.weekends} weekend${king.weekends === 1 ? '' : 's'}`;
   }
+  if (eloData.qualified && eloData.qualified[p] === false) {
+    const n = eloData.matchesPlayed[p] ?? 0;
+    const need = MIN_MATCHES_FOR_FULL_ELO - n;
+    return `⏳ Provisional · ${n}/${MIN_MATCHES_FOR_FULL_ELO} matches (${need} more to lock in)`;
+  }
   if (streakType === 'W' && streak >= 3) return `🔥 ${streak}-match win streak`;
   if (streakType === 'L' && streak >= 3) return `❄️ ${streak} straight losses — bounce-back time`;
   const careerWins = careerStats[p]?.wins ?? 0;
@@ -523,7 +555,7 @@ function renderPowerRankings() {
           <div class="pr-sub">${sub}</div>
         </div>
         <div class="pr-form">${dots}</div>
-        <span class="pr-elo">${eloData.current[p] ?? ELO_START}</span>
+        <span class="pr-elo${eloData.qualified[p] === false ? ' provisional' : ''}" ${eloData.qualified[p] === false ? `title="Provisional — ${eloData.matchesPlayed[p]}/${MIN_MATCHES_FOR_FULL_ELO} matches played this season"` : ''}>${eloData.current[p] ?? ELO_START}</span>
       </div>`;
   }).join('');
 
@@ -855,6 +887,7 @@ function renderCharts() {
   const wrVals   = sorted.map(p => stats[p].matches ? stats[p].wins / stats[p].matches : 0);
   const barColors = sorted.map((p, i) => {
     const col = COLORS[state.players.indexOf(p) % COLORS.length];
+    if (eloData.qualified[p] === false) return col + '55'; // dimmed — not enough matches yet
     return col + (wrVals[i] > 0.5 ? 'ee' : wrVals[i] > 0 ? 'bb' : '66');
   });
 
@@ -890,7 +923,13 @@ function renderCharts() {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => ` ELO ${ctx.raw} · Win rate ${Math.round(wrVals[ctx.dataIndex] * 100)}% · ${stats[sorted[ctx.dataIndex]].matches} matches`
+              label: ctx => {
+                const p = sorted[ctx.dataIndex];
+                const base = ` ELO ${ctx.raw} · Win rate ${Math.round(wrVals[ctx.dataIndex] * 100)}% · ${stats[p].matches} matches`;
+                return eloData.qualified[p] === false
+                  ? base + ` · ⏳ provisional (${eloData.matchesPlayed[p]}/${MIN_MATCHES_FOR_FULL_ELO})`
+                  : base;
+              }
             }
           }
         }
@@ -2099,6 +2138,11 @@ async function fetchWeather(lat, lon) {
 
 const MORNING_START = 6;
 const MORNING_END = 12;
+// Wind data comes back from Open-Meteo in km/h; the group thinks in mph, so
+// we convert for the threshold check and for anything we display as a
+// dedicated wind warning (the rest of the app's km/h labels stay unchanged).
+const WIND_WARN_MPH = 8;
+function kmhToMph(kmh) { return kmh * 0.621371; }
 
 function getMorningHours(data, dateStr) {
   const times = data.hourly.time;
@@ -2144,6 +2188,36 @@ function renderUVCard(hours, dailyUvMax) {
   const info = uvLevel(peakUV);
   const pct = Math.min(100, peakUV / 12 * 100).toFixed(0);
   return '<div class="uv-card uv-' + info.rank + '"><div class="uv-left"><div class="uv-emoji">' + info.emoji + '</div><div><div class="uv-label">UV Index 6 AM-12 PM</div><div class="uv-title">' + info.level + ' <span class="uv-num">' + peakUV.toFixed(1) + '</span>' + (peakHour ? ' <span class="uv-peak-time">peaks ' + peakHour.label + '</span>' : '') + '</div><div class="uv-advice">' + info.text + '</div></div></div><div class="uv-bar-wrap"><div class="uv-track"><div class="uv-fill" style="width:' + pct + '%;background:' + info.color + '"></div></div><div class="uv-zones"><span style="color:#1D9E75">Low 0</span><span style="color:#F5C842">Mod 3</span><span style="color:#EF9F27">High 6</span><span style="color:#D85A30">8+</span><span style="color:#7B2FBE">11+</span></div></div></div>';
+}
+
+// ── Wind warning card ───────────────────────────────────────────────────
+// Two-state (favourable/not favourable) rather than UV's graduated scale,
+// since the group only cares about one line: "is it too windy to play".
+function windStatus(hours) {
+  if (!hours || hours.length === 0) return null;
+  const peakHour = hours.reduce((b, h) => h.wind > b.wind ? h : b, hours[0]);
+  const peakMph = kmhToMph(peakHour.wind);
+  const unfavourable = peakMph > WIND_WARN_MPH;
+  return { peakMph, peakHour, unfavourable };
+}
+function renderWindCard(hours) {
+  const w = windStatus(hours);
+  if (!w) return '';
+  const rank = w.unfavourable ? 'unfavourable' : 'favourable';
+  const emoji = w.unfavourable ? '🌬️' : '🍃';
+  const title = w.unfavourable ? 'Wind not favourable' : 'Wind favourable';
+  const advice = w.unfavourable
+    ? `Peak ${w.peakMph.toFixed(1)} mph at ${w.peakHour.label} — above the ${WIND_WARN_MPH} mph comfort line. Expect drift on serves and lobs.`
+    : `Peak ${w.peakMph.toFixed(1)} mph at ${w.peakHour.label} — calm enough for normal play.`;
+  return `
+    <div class="wind-card wind-${rank}">
+      <div class="wind-emoji">${emoji}</div>
+      <div>
+        <div class="wind-label">Wind · 6 AM – 12 PM</div>
+        <div class="wind-title">${title} <span class="wind-num">${w.peakMph.toFixed(1)} mph</span></div>
+        <div class="wind-advice">${advice}</div>
+      </div>
+    </div>`;
 }
 function morningPlayability(hours) {
   if (!hours || hours.length === 0) return null;
@@ -2288,6 +2362,7 @@ function renderWeather() {
           <div class="verdict-text">${verdict.reason}</div>
         </div>
       </div>
+      ${renderWindCard(morningHours)}
       ${renderUVCard(morningHours, daily.uv_index_max?.[nextWeekend] ?? 0)}`;
   } else {
     adviceEl.innerHTML = '';
@@ -2476,7 +2551,8 @@ async function renderWeekendCoordinator() {
         <div class="wc-hour-grid">
           ${morningHours.map(h => {
             const isBest = bestWin && (h.label === bestWin.startLabel || h.label === bestWin.midLabel || h.label === bestWin.endLabel);
-            const isWarn = !isBest && (h.rain >= 30 || h.wind >= 20);
+            const hourWindy = kmhToMph(h.wind) > WIND_WARN_MPH;
+            const isWarn = !isBest && (h.rain >= 30 || hourWindy);
             const cls = isBest ? 'wc-hour-cell best' : isWarn ? 'wc-hour-cell warn' : 'wc-hour-cell';
             return `
               <div class="${cls}">
@@ -2484,11 +2560,18 @@ async function renderWeekendCoordinator() {
                 <div class="wc-h-icon">${weatherIcon(h.code)}</div>
                 <div class="wc-h-temp">${h.temp}°C</div>
                 <div class="wc-h-rain">💧${h.rain}%</div>
-                <div class="wc-h-wind">💨${h.wind}</div>
+                <div class="wc-h-wind${hourWindy ? ' windy' : ''}">💨${kmhToMph(h.wind).toFixed(0)}mph</div>
                 ${h.uv != null ? `<div class="wc-h-uv" style="color:${uvDotColor(h.uv)}">UV ${h.uv.toFixed(0)}</div>` : ''}
                 ${isBest ? '<div class="wc-best-badge">Best</div>' : ''}
               </div>`;
           }).join('')}
+        </div>` : '';
+
+      const windInfo = windStatus(morningHours);
+      const peakWindMph = windInfo ? windInfo.peakMph : kmhToMph(peakWind);
+      const windBannerHtml = windInfo && windInfo.unfavourable ? `
+        <div class="wc-wind-banner">
+          🌬️ <strong>Wind not favourable</strong> — up to ${peakWindMph.toFixed(1)} mph around ${windInfo.peakHour.label}
         </div>` : '';
 
       weatherColHtml = `
@@ -2508,7 +2591,7 @@ async function renderWeekendCoordinator() {
               </div>
               <div class="wc-stat">
                 <div class="wc-stat-label">Peak wind</div>
-                <div class="wc-stat-value">💨 ${peakWind} km/h</div>
+                <div class="wc-stat-value" style="${peakWindMph > WIND_WARN_MPH ? 'color:var(--danger)' : ''}">💨 ${peakWindMph.toFixed(1)} mph</div>
               </div>
               ${sunrise ? `
               <div class="wc-stat">
@@ -2517,6 +2600,7 @@ async function renderWeekendCoordinator() {
               </div>` : ''}
             </div>
           </div>
+          ${windBannerHtml}
           ${bestWindowHtml}
           ${hourlyGridHtml}
           <div class="wc-verdict ${verdict.rank}">
