@@ -1,6 +1,6 @@
-// ═══ VERSION: v10-ranked-standings · 2026-10-07 ═══
+// ═══ VERSION: v11-single-list · 2026-10-07 ═══
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-console.log('NJ Tennis Tracker — v10-ranked-standings');
+console.log('NJ Tennis Tracker — v11-single-list');
 import {
   getFirestore, doc, setDoc, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -533,7 +533,7 @@ function renderPowerRankings() {
   const st = standingsFor(matches, rampOn);
   const eloData = st.data;
   const T = eloData.threshold;
-  const order = st.ranked; // numbered list — used by the "pts behind" hooks
+  const order = st.order; // single numbered list (more-active players first)
 
   // Movement = position now vs position before the most recent match date in
   // scope. Both sides use the same formula, so arrows only show real changes.
@@ -544,12 +544,12 @@ function renderPowerRankings() {
   const stats = statsFor(matches);
   const careerStats = statsFor(sortedMatches());
 
-  const buildRow = (p, i, isRanked) => {
+  const buildRow = (p, i) => {
     const rank = i + 1;
+    const isRanked = st.ranked.includes(p); // still drives the muted style on low-volume ratings
     const prevIdx = prevSt.order.indexOf(p);
     let moveHtml;
     if (prevIdx === -1) moveHtml = `<span class="pr-move new">NEW</span>`;
-    else if (!isRanked) moveHtml = `<span class="pr-move flat"></span>`;
     else {
       const diff = prevIdx - st.order.indexOf(p);
       moveHtml = diff > 0 ? `<span class="pr-move up">▲${diff}</span>`
@@ -562,10 +562,10 @@ function renderPowerRankings() {
     const isKing = king && king.king === p;
     const avatarHtml = playerAvatarHtml(p, 'pr-avatar');
     const n = eloData.matchesPlayed[p] ?? 0;
-    const eloTitle = isRanked ? '' : ` title="Building rating — ${n}/${T} matches played; ${T} needed to be ranked"`;
+    const eloTitle = isRanked ? '' : ` title="Rating still settling — ${n}/${T} matches played; counts in full at ${T}"`;
     return `
       <div class="pr-row ${isKing ? 'pr-king' : ''}" data-profile="${escapeHtml(p)}" role="button" tabindex="0">
-        <span class="pr-rank">${isRanked ? rank : '–'}</span>
+        <span class="pr-rank">${rank}</span>
         ${moveHtml}
         ${avatarHtml}
         <div class="pr-info">
@@ -580,11 +580,7 @@ function renderPowerRankings() {
       </div>`;
   };
 
-  const rankedRows = st.ranked.map((p, i) => buildRow(p, i, true)).join('');
-  const buildingRows = st.building.length ? `
-      <div class="pr-building-label">⏳ Building rating <span>· ${T} matches to be ranked</span></div>
-      ${st.building.map((p, i) => buildRow(p, st.ranked.length + i, false)).join('')}` : '';
-  const rows = rankedRows + buildingRows;
+  const rows = st.order.map((p, i) => buildRow(p, i)).join('');
 
   const watchCards = [];
   computeRivalries(matches).forEach(r => {
@@ -747,11 +743,11 @@ function openPlayerProfile(p, scope = 'view') {
   const pct = Math.round((d.wins / (d.wins + d.losses)) * 100);
 
   const st = viewStandings();
-  const rankIdx = st.ranked.indexOf(p);
+  const rankIdx = st.order.indexOf(p);
   let rankText = '';
-  if (!isCareer) {
-    if (rankIdx >= 0) rankText = `#${rankIdx + 1} in current view · `;
-    else if (st.building.includes(p)) rankText = `⏳ ${st.data.matchesPlayed[p]}/${st.data.threshold} matches · building · `;
+  if (!isCareer && rankIdx >= 0) {
+    rankText = `#${rankIdx + 1} in current view · `;
+    if (st.building.includes(p)) rankText += `⏳ ${st.data.matchesPlayed[p]}/${st.data.threshold} matches · `;
   }
   const streakChip = d.currentStreakType
     ? `<span class="prof-chip ${d.currentStreakType === 'W' ? 'chip-w' : 'chip-l'}">${d.currentStreakType === 'W' ? '🔥 Won' : '❄️ Lost'} last ${d.currentStreak}</span>`
@@ -988,7 +984,7 @@ function renderCharts() {
                 const p = sorted[ctx.dataIndex];
                 const base = ` ELO ${ctx.raw} · Win rate ${Math.round(wrVals[ctx.dataIndex] * 100)}% · ${stats[p].matches} matches`;
                 return eloData.qualified[p] === false
-                  ? base + ` · ⏳ building rating (${eloData.matchesPlayed[p]}/${eloData.threshold} to be ranked)`
+                  ? base + ` · ⏳ rating still settling (${eloData.matchesPlayed[p]}/${eloData.threshold} matches)`
                   : base;
               }
             }
@@ -3007,7 +3003,7 @@ function buildTickerContext() {
     const lastDate = viewMatches[viewMatches.length - 1].date;
     const nowSt = standingsFor(viewMatches, rampOn);
     const prevSt = standingsFor(viewMatches.filter(m => m.date !== lastDate), rampOn);
-    nowSt.ranked.forEach((p, i) => {
+    nowSt.order.forEach((p, i) => {
       const pi = prevSt.order.indexOf(p);
       if (pi >= 0 && pi - i !== 0) rankMovers.push(`${p} ${pi - i > 0 ? 'climbed' : 'dropped'} ${Math.abs(pi - i)} spot${Math.abs(pi - i) === 1 ? '' : 's'} to #${i + 1}`);
     });
