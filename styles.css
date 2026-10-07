@@ -174,7 +174,7 @@ button:active { transform: scale(0.98); }
   gap: 10px;
   margin-bottom: 16px;
 }
-/* ── AI Ticker ── */
+/* â”€â”€ AI Ticker â”€â”€ */
 .ticker-wrap {
   display: flex;
   align-items: center;
@@ -517,6 +517,67 @@ th.right, td.right { text-align: right; }
   font-size: 15px;
   font-weight: 500;
 }
+
+/* â”€â”€ UV Index card â”€â”€ */
+.uv-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid transparent;
+  flex-wrap: wrap;
+}
+.uv-card.uv-low      { background: rgba(29,158,117,0.09);  border-color: rgba(29,158,117,0.25); }
+.uv-card.uv-moderate { background: rgba(245,200,66,0.10);  border-color: rgba(245,200,66,0.3); }
+.uv-card.uv-high     { background: rgba(239,159,39,0.10);  border-color: rgba(239,159,39,0.3); }
+.uv-card.uv-veryhigh { background: rgba(216,90,48,0.10);   border-color: rgba(216,90,48,0.3); }
+.uv-card.uv-extreme  { background: rgba(123,47,190,0.10);  border-color: rgba(123,47,190,0.3); }
+.uv-left { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 200px; }
+.uv-emoji { font-size: 26px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+.uv-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.uv-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.uv-num { font-size: 20px; font-weight: 700; }
+.uv-peak-time { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+.uv-advice { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.uv-bar-wrap { min-width: 140px; flex: 1; max-width: 200px; }
+.uv-track { height: 8px; background: var(--surface-2); border-radius: 4px; position: relative; overflow: hidden; margin-bottom: 4px; }
+.uv-fill  { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+.uv-zones { display: flex; justify-content: space-between; font-size: 9px; font-weight: 600; }
+
+/* â”€â”€ Wind warning card (Weather tab) â€” two-state, mirrors UV card layout â”€â”€ */
+.wind-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid transparent;
+}
+.wind-card.wind-favourable   { background: rgba(29,158,117,0.09); border-color: rgba(29,158,117,0.25); }
+.wind-card.wind-unfavourable { background: rgba(163,45,45,0.10);  border-color: rgba(163,45,45,0.3); }
+.wind-emoji { font-size: 26px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+.wind-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 2px; }
+.wind-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wind-card.wind-unfavourable .wind-title { color: var(--danger); }
+.wind-num { font-size: 16px; font-weight: 700; }
+.wind-advice { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+
+/* â”€â”€ Wind banner on the weekend coordinator card â€” only shown when windy â”€â”€ */
+.wc-wind-banner {
+  background: rgba(163,45,45,0.1);
+  border: 1px solid rgba(163,45,45,0.3);
+  color: var(--danger);
+  border-radius: var(--radius-lg);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.wc-h-wind.windy { color: var(--danger); font-weight: 700; }
 
 .forecast-grid {
   display: grid;
@@ -937,7 +998,7 @@ th.right, td.right { text-align: right; }
   padding: 16px;
 }
 
-/* ── Voice entry ── */
+/* â”€â”€ Voice entry â”€â”€ */
 .voice-card { border: 1px solid rgba(29,158,117,0.3) !important; background: rgba(29,158,117,0.04) !important; }
 .voice-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .voice-title { font-size: 15px; font-weight: 600; }
@@ -989,7 +1050,7 @@ th.right, td.right { text-align: right; }
 .voice-examples { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
 .voice-examples em { color: var(--text); font-style: normal; }
 
-/* ── Vote share toast ── */
+/* â”€â”€ Vote share toast â”€â”€ */
 .vote-share-toast {
   position: fixed;
   bottom: 20px; left: 50%;
@@ -1036,7 +1097,7 @@ th.right, td.right { text-align: right; }
   .rotation-vs { display: none; }
 }
 
-/* ── Power rankings ─────────────────────────────────────────────────── */
+/* â”€â”€ Power rankings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .pr-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1082,6 +1143,8 @@ th.right, td.right { text-align: right; }
 .pr-dot.w { background: #639922; }
 .pr-dot.l { background: #E24B4A; }
 .pr-elo { font-size: 13px; font-weight: 600; width: 42px; text-align: right; flex-shrink: 0; }
+.pr-elo.provisional { color: var(--text-muted); font-weight: 500; opacity: 0.75; }
+.pr-elo.provisional::after { content: ' â³'; font-size: 10px; }
 .rw-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-dim); margin: 12px 0 6px;
@@ -1095,7 +1158,7 @@ th.right, td.right { text-align: right; }
   .pr-form { display: none; }
 }
 
-/* ── Player avatars ─────────────────────────────────────────────────── */
+/* â”€â”€ Player avatars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 img.pr-avatar {
   width: 30px; height: 30px; border-radius: 50%;
   object-fit: cover; flex-shrink: 0; display: block;
@@ -1112,7 +1175,7 @@ img.pr-avatar {
 }
 .pp-photo-btn { flex-shrink: 0; }
 
-/* ── Avatars in champion badge + history cards ──────────────────────── */
+/* â”€â”€ Avatars in champion badge + history cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .avatar-initials {
   color: #fff; display: flex; align-items: center; justify-content: center;
   font-weight: 600;
@@ -1139,7 +1202,7 @@ img.pr-avatar {
 .mc-avatar + .mc-avatar { margin-left: -7px; }
 .champion-badge { margin-top: 14px; margin-bottom: 4px; }
 
-/* ── Badge row + king badge ─────────────────────────────────────────── */
+/* â”€â”€ Badge row + king badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .badge-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -1149,7 +1212,7 @@ img.pr-avatar {
 .badge-row .champion-badge { margin: 0; }
 .king-badge { background: rgba(239,159,39,0.12); border-color: rgba(239,159,39,0.45); }
 
-/* ── Crop modal ─────────────────────────────────────────────────────── */
+/* â”€â”€ Crop modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .crop-overlay {
   position: fixed; inset: 0; z-index: 1000;
   background: rgba(0,0,0,0.55);
@@ -1174,7 +1237,7 @@ img.pr-avatar {
 .crop-zoom { width: 100%; }
 .crop-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* ── Player profile modal ───────────────────────────────────────────── */
+/* â”€â”€ Player profile modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .pr-row[data-profile] { cursor: pointer; }
 .pr-row[data-profile]:hover { border-color: var(--accent); }
 .profile-overlay {
