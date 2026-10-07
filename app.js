@@ -1,6 +1,6 @@
-// ═══ VERSION: v9-player-profiles · 2026-07-09 ═══
+// ═══ VERSION: v10-ranked-standings · 2026-10-07 ═══
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-console.log('NJ Tennis Tracker — v9-player-profiles');
+console.log('NJ Tennis Tracker — v10-ranked-standings');
 import {
   getFirestore, doc, setDoc, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -19,9 +19,11 @@ const DEFAULT_PLAYERS = ['Gaurav','Manuj','Manish','Vivek','Chirag','Gaurang','M
 const ELO_START = 1200;
 const ELO_K = 32;
 // Participation ramp — a player's rating only counts in full once they've
-// played this many matches in the current season/view. Below that, the
-// distance from 1200 is scaled down proportionally, so a low-volume player
-// can't sit at an inflated (or deflated) rating on the back of 1-2 sessions.
+// played enough matches this season/view. Below that, the distance from 1200
+// is scaled down proportionally, so a low-volume player can't sit at an
+// inflated (or deflated) rating on the back of 1-2 sessions.
+// 20 is the CAP: the live threshold adapts to the season (see rampThresholdFor)
+// so early in a season nobody is squashed because nobody can have 20 yet.
 const MIN_MATCHES_FOR_FULL_ELO = 20;
 
 // ── Season definitions (auto-detected from date) ─────────────────────────
@@ -233,29 +235,35 @@ function renderSeasonBanner() {
     <div class="sb-badge">${season.id}</div>`;
 }
 
-function computeElo(seasonId) {
-  const rawElo = {};
-  state.players.forEach(p => { rawElo[p] = ELO_START; });
-  const matchCount = {};
-  state.players.forEach(p => { matchCount[p] = 0; });
-  const history = {};
-  state.players.forEach(p => { history[p] = [{ n: 0, rating: ELO_START }]; });
-  // Use matches for the current filter (season-aware) — hard reset to 1200 each season
-  const matches = seasonId
-    ? sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId)
-    : filteredMatches();
+// ── ELO engine — single source of truth ───────────────────────────────────
+// Threshold T = half the matches of the season's busiest player, capped at
+// MIN_MATCHES_FOR_FULL_ELO. Players with >= T matches are "ranked"; anyone
+// below T is "building" — rating scaled toward 1200 and listed beneath the
+// ranked players. Early season T is small; by mid-season it reaches the cap.
+function rampThresholdFor(leaderMatches) {
+  return Math.max(1, Math.min(MIN_MATCHES_FOR_FULL_ELO, Math.ceil(leaderMatches / 2)));
+}
 
-  // Adjusted rating at any point in time: distance from 1200 scaled by how
-  // many matches that player has played so far, capped once they cross
-  // MIN_MATCHES_FOR_FULL_ELO. This also makes the history line visually show
-  // the "ramp" — early points hug 1200, later points reflect full strength.
-  const adjusted = (player) => {
-    const raw = rawElo[player] ?? ELO_START;
-    const n = matchCount[player] ?? 0;
-    const factor = Math.min(1, n / MIN_MATCHES_FOR_FULL_ELO);
-    return ELO_START + (raw - ELO_START) * factor;
+function computeEloFor(matches, rampOn = true) {
+  const rawElo = {}, matchCount = {}, running = {}, history = {};
+  state.players.forEach(p => {
+    rawElo[p] = ELO_START; matchCount[p] = 0; running[p] = 0;
+    history[p] = [{ n: 0, rating: ELO_START }];
+  });
+  // Pass 1 — matches per player, to find the busiest player's count
+  matches.forEach(m => [...m.teamA, ...m.teamB].forEach(p => {
+    if (matchCount[p] !== undefined) matchCount[p]++;
+  }));
+  const leader = state.players.reduce((mx, p) => Math.max(mx, matchCount[p]), 0);
+  const threshold = rampOn ? rampThresholdFor(leader) : 1;
+
+  // Adjusted rating: distance from 1200 scaled by matches played so far.
+  const adjusted = (p) => {
+    const factor = Math.min(1, (running[p] ?? 0) / threshold);
+    return ELO_START + ((rawElo[p] ?? ELO_START) - ELO_START) * factor;
   };
 
+  // Pass 2 — standard ELO on raw ratings, recording ramp-adjusted history
   matches.forEach((m, idx) => {
     const teamAvg = (team) => team.reduce((acc, p) => acc + (rawElo[p] ?? ELO_START), 0) / team.length;
     const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
@@ -265,24 +273,53 @@ function computeElo(seasonId) {
     const deltaB = ELO_K * ((1 - scoreA) - (1 - expA));
     m.teamA.forEach(p => {
       rawElo[p] = (rawElo[p] ?? ELO_START) + deltaA;
-      matchCount[p] = (matchCount[p] ?? 0) + 1;
-      history[p].push({ n: idx + 1, rating: Math.round(adjusted(p)) });
+      running[p] = (running[p] ?? 0) + 1;
+      if (history[p]) history[p].push({ n: idx + 1, rating: Math.round(adjusted(p)) });
     });
     m.teamB.forEach(p => {
       rawElo[p] = (rawElo[p] ?? ELO_START) + deltaB;
-      matchCount[p] = (matchCount[p] ?? 0) + 1;
-      history[p].push({ n: idx + 1, rating: Math.round(adjusted(p)) });
+      running[p] = (running[p] ?? 0) + 1;
+      if (history[p]) history[p].push({ n: idx + 1, rating: Math.round(adjusted(p)) });
     });
   });
 
   const current = {}, raw = {}, matchesPlayed = {}, qualified = {};
   state.players.forEach(p => {
-    matchesPlayed[p] = matchCount[p] ?? 0;
-    raw[p] = Math.round(rawElo[p] ?? ELO_START);
+    matchesPlayed[p] = matchCount[p];
+    raw[p] = Math.round(rawElo[p]);
     current[p] = Math.round(adjusted(p));
-    qualified[p] = matchesPlayed[p] >= MIN_MATCHES_FOR_FULL_ELO;
+    qualified[p] = matchCount[p] > 0 && matchCount[p] >= threshold;
   });
-  return { current, raw, history, matchesPlayed, qualified };
+  return { current, raw, history, matchesPlayed, qualified, threshold };
+}
+
+// A single-weekend view has too few matches per player for a ramp to mean
+// anything, so ratings there are shown unadjusted.
+function isSingleDayView() {
+  return currentFilter !== 'all' && !String(currentFilter).startsWith('season:');
+}
+
+function computeElo(seasonId) {
+  const matches = seasonId
+    ? sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId)
+    : filteredMatches();
+  return computeEloFor(matches, seasonId ? true : !isSingleDayView());
+}
+
+// Standings: ranked players (>= T matches) first, then "building" players.
+// Each group is sorted by adjusted rating. `order` is the combined display order.
+function standingsFor(matches, rampOn = true) {
+  const data = computeEloFor(matches, rampOn);
+  const played = playedCounts(matches);
+  const byElo = (a, b) => (data.current[b] ?? ELO_START) - (data.current[a] ?? ELO_START);
+  const active = state.players.filter(p => played[p] > 0);
+  const ranked = active.filter(p => data.qualified[p]).sort(byElo);
+  const building = active.filter(p => !data.qualified[p]).sort(byElo);
+  return { data, played, ranked, building, order: [...ranked, ...building] };
+}
+
+function viewStandings() {
+  return standingsFor(filteredMatches(), !isSingleDayView());
 }
 
 function statsFor(matches) {
@@ -343,23 +380,6 @@ function playerColor(name) {
 }
 
 // ELO over an arbitrary ordered list of matches (no filter dependency)
-function eloOver(matches) {
-  const elo = {};
-  state.players.forEach(p => { elo[p] = ELO_START; });
-  matches.forEach(m => {
-    const teamAvg = t => t.reduce((a, p) => a + (elo[p] ?? ELO_START), 0) / t.length;
-    const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
-    const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
-    const sA = m.winner === 'A' ? 1 : 0;
-    const dA = ELO_K * (sA - expA), dB = ELO_K * ((1 - sA) - (1 - expA));
-    m.teamA.forEach(p => { elo[p] = (elo[p] ?? ELO_START) + dA; });
-    m.teamB.forEach(p => { elo[p] = (elo[p] ?? ELO_START) + dB; });
-  });
-  const out = {};
-  state.players.forEach(p => { out[p] = Math.round(elo[p] ?? ELO_START); });
-  return out;
-}
-
 function playedCounts(matches) {
   const c = {};
   state.players.forEach(p => { c[p] = 0; });
@@ -477,8 +497,7 @@ function playerSubtitle(p, ctx) {
   }
   if (eloData.qualified && eloData.qualified[p] === false) {
     const n = eloData.matchesPlayed[p] ?? 0;
-    const need = MIN_MATCHES_FOR_FULL_ELO - n;
-    return `⏳ Provisional · ${n}/${MIN_MATCHES_FOR_FULL_ELO} matches (${need} more to lock in)`;
+    return `⏳ ${n}/${eloData.threshold} matches`;
   }
   if (streakType === 'W' && streak >= 3) return `🔥 ${streak}-match win streak`;
   if (streakType === 'L' && streak >= 3) return `❄️ ${streak} straight losses — bounce-back time`;
@@ -510,32 +529,29 @@ function renderPowerRankings() {
   const matches = filteredMatches();
   if (matches.length === 0) { box.innerHTML = ''; return; }
 
-  const eloData = computeElo();
-  const played = playedCounts(matches);
-  const order = [...state.players]
-    .filter(p => played[p] > 0)
-    .sort((a, b) => (eloData.current[b] ?? ELO_START) - (eloData.current[a] ?? ELO_START));
+  const rampOn = !isSingleDayView();
+  const st = standingsFor(matches, rampOn);
+  const eloData = st.data;
+  const T = eloData.threshold;
+  const order = st.ranked; // numbered list — used by the "pts behind" hooks
 
-  // Movement = rank now vs rank before the most recent match date in scope
+  // Movement = position now vs position before the most recent match date in
+  // scope. Both sides use the same formula, so arrows only show real changes.
   const lastDate = matches[matches.length - 1].date;
-  const prevMatches = matches.filter(m => m.date !== lastDate);
-  const prevElo = eloOver(prevMatches);
-  const prevPlayed = playedCounts(prevMatches);
-  const prevOrder = [...state.players]
-    .filter(p => prevPlayed[p] > 0)
-    .sort((a, b) => prevElo[b] - prevElo[a]);
+  const prevSt = standingsFor(matches.filter(m => m.date !== lastDate), rampOn);
 
   const king = computeKingOfCourt(matches);
   const stats = statsFor(matches);
   const careerStats = statsFor(sortedMatches());
 
-  const rows = order.map((p, i) => {
+  const buildRow = (p, i, isRanked) => {
     const rank = i + 1;
-    const prevIdx = prevOrder.indexOf(p);
+    const prevIdx = prevSt.order.indexOf(p);
     let moveHtml;
     if (prevIdx === -1) moveHtml = `<span class="pr-move new">NEW</span>`;
+    else if (!isRanked) moveHtml = `<span class="pr-move flat"></span>`;
     else {
-      const diff = prevIdx - i;
+      const diff = prevIdx - st.order.indexOf(p);
       moveHtml = diff > 0 ? `<span class="pr-move up">▲${diff}</span>`
         : diff < 0 ? `<span class="pr-move down">▼${-diff}</span>`
         : `<span class="pr-move flat">—</span>`;
@@ -545,9 +561,11 @@ function renderPowerRankings() {
     const sub = playerSubtitle(p, { rank, order, eloData, stats, careerStats, king, streak, streakType });
     const isKing = king && king.king === p;
     const avatarHtml = playerAvatarHtml(p, 'pr-avatar');
+    const n = eloData.matchesPlayed[p] ?? 0;
+    const eloTitle = isRanked ? '' : ` title="Building rating — ${n}/${T} matches played; ${T} needed to be ranked"`;
     return `
       <div class="pr-row ${isKing ? 'pr-king' : ''}" data-profile="${escapeHtml(p)}" role="button" tabindex="0">
-        <span class="pr-rank">${rank}</span>
+        <span class="pr-rank">${isRanked ? rank : '–'}</span>
         ${moveHtml}
         ${avatarHtml}
         <div class="pr-info">
@@ -555,9 +573,18 @@ function renderPowerRankings() {
           <div class="pr-sub">${sub}</div>
         </div>
         <div class="pr-form">${dots}</div>
-        <span class="pr-elo${eloData.qualified[p] === false ? ' provisional' : ''}" ${eloData.qualified[p] === false ? `title="Provisional — ${eloData.matchesPlayed[p]}/${MIN_MATCHES_FOR_FULL_ELO} matches played this season"` : ''}>${eloData.current[p] ?? ELO_START}</span>
+        <div class="pr-elo-wrap">
+          <span class="pr-elo${isRanked ? '' : ' provisional'}"${eloTitle}>${eloData.current[p] ?? ELO_START}</span>
+          <span class="pr-played">${n} ${n === 1 ? 'match' : 'matches'}</span>
+        </div>
       </div>`;
-  }).join('');
+  };
+
+  const rankedRows = st.ranked.map((p, i) => buildRow(p, i, true)).join('');
+  const buildingRows = st.building.length ? `
+      <div class="pr-building-label">⏳ Building rating <span>· ${T} matches to be ranked</span></div>
+      ${st.building.map((p, i) => buildRow(p, st.ranked.length + i, false)).join('')}` : '';
+  const rows = rankedRows + buildingRows;
 
   const watchCards = [];
   computeRivalries(matches).forEach(r => {
@@ -605,8 +632,11 @@ function renderPowerRankings() {
 }
 
 // ── Player profile ────────────────────────────────────────────────────────
-function playerProfileData(p) {
-  const all = sortedMatches();
+// scope 'view' = matches in the current dashboard view (season by default),
+// 'career' = every match across all seasons.
+function playerProfileData(p, scope = 'view') {
+  const career = scope === 'career';
+  const all = career ? sortedMatches() : filteredMatches();
   const mine = all.filter(m => m.teamA.includes(p) || m.teamB.includes(p));
   let wins = 0, losses = 0, setsW = 0, setsL = 0, gamesW = 0, gamesL = 0;
   let bestWinStreak = 0, worstLossStreak = 0, run = 0, runType = null;
@@ -639,25 +669,37 @@ function playerProfileData(p) {
     });
   });
 
-  // Career ELO trajectory (full simulation; record p's rating after their matches)
-  const elo = {};
-  state.players.forEach(x => { elo[x] = ELO_START; });
-  const series = [ELO_START];
-  let peak = ELO_START, peakDate = null;
-  all.forEach(m => {
-    const teamAvg = t => t.reduce((a, x) => a + (elo[x] ?? ELO_START), 0) / t.length;
-    const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
-    const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
-    const sA = m.winner === 'A' ? 1 : 0;
-    const dA = ELO_K * (sA - expA), dB = ELO_K * ((1 - sA) - (1 - expA));
-    m.teamA.forEach(x => { elo[x] = (elo[x] ?? ELO_START) + dA; });
-    m.teamB.forEach(x => { elo[x] = (elo[x] ?? ELO_START) + dB; });
-    if (m.teamA.includes(p) || m.teamB.includes(p)) {
-      const v = Math.round(elo[p]);
-      series.push(v);
-      if (v > peak) { peak = v; peakDate = m.date; }
-    }
-  });
+  let series, peak = ELO_START, peakDate = null, eloNow;
+  if (career) {
+    // Career ELO trajectory (raw, never resets; record p's rating after their matches)
+    const elo = {};
+    state.players.forEach(x => { elo[x] = ELO_START; });
+    series = [ELO_START];
+    all.forEach(m => {
+      const teamAvg = t => t.reduce((a, x) => a + (elo[x] ?? ELO_START), 0) / t.length;
+      const rA = teamAvg(m.teamA), rB = teamAvg(m.teamB);
+      const expA = 1 / (1 + Math.pow(10, (rB - rA) / 400));
+      const sA = m.winner === 'A' ? 1 : 0;
+      const dA = ELO_K * (sA - expA), dB = ELO_K * ((1 - sA) - (1 - expA));
+      m.teamA.forEach(x => { elo[x] = (elo[x] ?? ELO_START) + dA; });
+      m.teamB.forEach(x => { elo[x] = (elo[x] ?? ELO_START) + dB; });
+      if (m.teamA.includes(p) || m.teamB.includes(p)) {
+        const v = Math.round(elo[p]);
+        series.push(v);
+        if (v > peak) { peak = v; peakDate = m.date; }
+      }
+    });
+    eloNow = Math.round(elo[p] ?? ELO_START);
+  } else {
+    // View ELO — exactly the number the leaderboard shows (season-scoped, ramp-adjusted)
+    const ed = computeElo();
+    const hist = ed.history[p] || [{ n: 0, rating: ELO_START }];
+    series = hist.map(h => h.rating);
+    hist.forEach((h, i) => {
+      if (i > 0 && h.rating > peak) { peak = h.rating; peakDate = all[h.n - 1]?.date || null; }
+    });
+    eloNow = ed.current[p] ?? ELO_START;
+  }
 
   const pick = (obj, best) => Object.entries(obj)
     .map(([name, r]) => ({ name, ...r, total: r.w + r.l, pct: (r.w + r.l) ? r.w / (r.w + r.l) : 0 }))
@@ -670,7 +712,7 @@ function playerProfileData(p) {
     bestWinStreak, worstLossStreak,
     currentStreak: streak, currentStreakType: streakType,
     weekends: new Set(mine.map(m => m.date)).size,
-    eloNow: Math.round(elo[p] ?? ELO_START), series, peak, peakDate,
+    eloNow, series, peak, peakDate,
     bestPartner: pick(partners, true),
     toughestRival: pick(opponents, false)
   };
@@ -691,20 +733,34 @@ function eloSparklineSvg(series, color) {
   </svg>`;
 }
 
-function openPlayerProfile(p) {
+function openPlayerProfile(p, scope = 'view') {
   document.querySelector('.profile-overlay')?.remove();
-  const d = playerProfileData(p);
+  let d = playerProfileData(p, scope);
+  // Not played in this view (e.g. hasn't played this season yet) — show career instead
+  if (!d.mine.length && scope === 'view') { scope = 'career'; d = playerProfileData(p, scope); }
   if (!d.mine.length) return;
+  const isCareer = scope === 'career';
+  const viewLabel = isSingleDayView() ? 'This weekend'
+    : String(currentFilter).startsWith('season:') ? currentFilter.slice(7) : 'All time';
+  const canToggle = currentFilter !== 'all'; // "All time" view already equals career
+  const hasViewMatches = filteredMatches().some(m => m.teamA.includes(p) || m.teamB.includes(p));
   const pct = Math.round((d.wins / (d.wins + d.losses)) * 100);
-  const all = filteredMatches(); // rank within current view
-  const eloData = computeElo();
-  const played = playedCounts(all);
-  const order = state.players.filter(x => played[x] > 0)
-    .sort((a, b) => (eloData.current[b] ?? ELO_START) - (eloData.current[a] ?? ELO_START));
-  const rank = order.indexOf(p) + 1;
+
+  const st = viewStandings();
+  const rankIdx = st.ranked.indexOf(p);
+  let rankText = '';
+  if (!isCareer) {
+    if (rankIdx >= 0) rankText = `#${rankIdx + 1} in current view · `;
+    else if (st.building.includes(p)) rankText = `⏳ ${st.data.matchesPlayed[p]}/${st.data.threshold} matches · building · `;
+  }
   const streakChip = d.currentStreakType
     ? `<span class="prof-chip ${d.currentStreakType === 'W' ? 'chip-w' : 'chip-l'}">${d.currentStreakType === 'W' ? '🔥 Won' : '❄️ Lost'} last ${d.currentStreak}</span>`
     : '';
+  const toggleHtml = canToggle ? `
+      <div class="prof-scope">
+        <button class="prof-scope-btn${!isCareer ? ' active' : ''}" data-scope="view"${hasViewMatches ? '' : ' disabled'}>${escapeHtml(viewLabel)}</button>
+        <button class="prof-scope-btn${isCareer ? ' active' : ''}" data-scope="career">Career</button>
+      </div>` : '';
 
   const recent = d.mine.slice(-8).reverse().map(m => {
     const inA = m.teamA.includes(p);
@@ -732,12 +788,13 @@ function openPlayerProfile(p) {
         ${playerAvatarHtml(p, 'prof-avatar')}
         <div>
           <div class="prof-name">${escapeHtml(p)}</div>
-          <div class="prof-subline">${rank > 0 ? `#${rank} in current view · ` : ''}ELO ${d.eloNow}</div>
+          <div class="prof-subline">${rankText}${isCareer ? 'Career ' : ''}ELO ${d.eloNow}</div>
           ${streakChip}
         </div>
       </div>
+      ${toggleHtml}
       <div class="prof-grid">
-        ${stat(`${d.wins}–${d.losses}`, 'Career W–L')}
+        ${stat(`${d.wins}–${d.losses}`, isCareer ? 'Career W–L' : 'W–L')}
         ${stat(`${pct}%`, 'Win rate')}
         ${stat(`${d.setsW}–${d.setsL}`, 'Sets won')}
         ${stat(`${d.gamesW}–${d.gamesL}`, 'Games won')}
@@ -748,13 +805,15 @@ function openPlayerProfile(p) {
       </div>
       ${d.bestPartner ? `<div class="prof-line">🤝 Best partner: <strong>${escapeHtml(d.bestPartner.name)}</strong> (${d.bestPartner.w}–${d.bestPartner.l} together)</div>` : ''}
       ${d.toughestRival ? `<div class="prof-line">⚔️ Toughest rival: <strong>${escapeHtml(d.toughestRival.name)}</strong> (${d.toughestRival.w}–${d.toughestRival.l} against)</div>` : ''}
-      <div class="prof-section">Career ELO</div>
+      <div class="prof-section">${isCareer ? 'Career ELO' : escapeHtml(viewLabel) + ' ELO'}</div>
       ${eloSparklineSvg(d.series, playerColor(p))}
       <div class="prof-section">Recent matches</div>
       ${recent}
     </div>`;
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('.prof-close').addEventListener('click', () => overlay.remove());
+  overlay.querySelectorAll('.prof-scope-btn').forEach(btn =>
+    btn.addEventListener('click', () => { if (!btn.disabled) openPlayerProfile(p, btn.dataset.scope); }));
   document.body.appendChild(overlay);
 }
 
@@ -881,8 +940,10 @@ function renderCharts() {
   const stats   = statsFor(matches);
 
   // ── Option B: ELO horizontal bar leaderboard ──────────────────────────
-  const sorted = [...state.players]
-    .sort((a, b) => eloData.current[b] - eloData.current[a]);
+  // Ranked players first (by adjusted rating), then players still building rating
+  const sorted = [...state.players].sort((a, b) =>
+    ((eloData.qualified[b] ? 1 : 0) - (eloData.qualified[a] ? 1 : 0)) ||
+    (eloData.current[b] - eloData.current[a]));
   const eloVals  = sorted.map(p => eloData.current[p]);
   const wrVals   = sorted.map(p => stats[p].matches ? stats[p].wins / stats[p].matches : 0);
   const barColors = sorted.map((p, i) => {
@@ -927,7 +988,7 @@ function renderCharts() {
                 const p = sorted[ctx.dataIndex];
                 const base = ` ELO ${ctx.raw} · Win rate ${Math.round(wrVals[ctx.dataIndex] * 100)}% · ${stats[p].matches} matches`;
                 return eloData.qualified[p] === false
-                  ? base + ` · ⏳ provisional (${eloData.matchesPlayed[p]}/${MIN_MATCHES_FOR_FULL_ELO})`
+                  ? base + ` · ⏳ building rating (${eloData.matchesPlayed[p]}/${eloData.threshold} to be ranked)`
                   : base;
               }
             }
@@ -2913,8 +2974,8 @@ function buildTickerContext() {
     .filter(p => todayStats[p].w > 0)
     .sort((a, b) => todayStats[b].w - todayStats[a].w)[0] || null;
 
-  const eloLeader = [...state.players]
-    .sort((a, b) => (eloData.current[b] || 1200) - (eloData.current[a] || 1200))[0];
+  const eloLeader = viewStandings().ranked[0]
+    || [...state.players].sort((a, b) => (eloData.current[b] || 1200) - (eloData.current[a] || 1200))[0];
 
   const mostLosses = [...state.players]
     .filter(p => playerStats[p].matches > 0)
@@ -2938,19 +2999,16 @@ function buildTickerContext() {
       if (next - w <= 2) milestones.push(`${p} is ${next - w} win${next - w === 1 ? '' : 's'} from ${next} career wins`);
     }
   });
-  const lastDate = allMatches.length ? allMatches[allMatches.length - 1].date : null;
+  // Rank movers use the same view-scoped, ramp-consistent standings as the power rankings
+  const viewMatches = filteredMatches();
   const rankMovers = [];
-  if (lastDate) {
-    const prev = allMatches.filter(m => m.date !== lastDate);
-    const prevElo = eloOver(prev);
-    const prevPlayed = playedCounts(prev);
-    const played = playedCounts(allMatches);
-    const nowOrder = state.players.filter(p => played[p] > 0)
-      .sort((a, b) => (eloData.current[b] ?? 1200) - (eloData.current[a] ?? 1200));
-    const prevOrder = state.players.filter(p => prevPlayed[p] > 0)
-      .sort((a, b) => prevElo[b] - prevElo[a]);
-    nowOrder.forEach((p, i) => {
-      const pi = prevOrder.indexOf(p);
+  if (viewMatches.length) {
+    const rampOn = !isSingleDayView();
+    const lastDate = viewMatches[viewMatches.length - 1].date;
+    const nowSt = standingsFor(viewMatches, rampOn);
+    const prevSt = standingsFor(viewMatches.filter(m => m.date !== lastDate), rampOn);
+    nowSt.ranked.forEach((p, i) => {
+      const pi = prevSt.order.indexOf(p);
       if (pi >= 0 && pi - i !== 0) rankMovers.push(`${p} ${pi - i > 0 ? 'climbed' : 'dropped'} ${Math.abs(pi - i)} spot${Math.abs(pi - i) === 1 ? '' : 's'} to #${i + 1}`);
     });
   }
