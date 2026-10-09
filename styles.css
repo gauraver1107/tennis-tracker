@@ -586,6 +586,35 @@ th.right, td.right { text-align: right; }
   .wind-card.wind-orange .wind-title, .wc-wind-banner.orange, .wc-h-wind.orange, .wind-text-orange { color: #F5A06A; }
 }
 
+/* Indoor court assist card (EBRC) - shown in the weekend card when weather is risky */
+.ic-card {
+  border: 1px solid rgba(55,138,221,0.45);
+  background: rgba(55,138,221,0.10);
+  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.ic-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.ic-slot { margin-bottom: 4px; }
+.ic-line { color: var(--text-muted); margin-bottom: 3px; line-height: 1.4; }
+.ic-line strong { color: var(--text); }
+.ic-open-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border: 1px solid #378ADD;
+  border-radius: var(--radius);
+  background: #378ADD;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ic-open-btn:hover { background: #2A6FB8; border-color: #2A6FB8; }
+.ic-note { font-size: 11px; color: var(--text-dim); margin-top: 5px; text-align: center; }
+
 .forecast-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
