@@ -1,6 +1,6 @@
-// ═══ VERSION: v13-indoor-assist · 2026-10-09 ═══
+// ═══ VERSION: v14-partners-season · 2026-10-09 ═══
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-console.log('NJ Tennis Tracker — v13-indoor-assist');
+console.log('NJ Tennis Tracker — v14-partners-season');
 import {
   getFirestore, doc, setDoc, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -359,9 +359,8 @@ function statsFor(matches) {
 }
 
 
-function computePairStreaks() {
+function computePairStreaks(sorted = sortedMatches()) {
   const streaks = {};
-  const sorted = sortedMatches();
   sorted.forEach(m => {
     const aWin = m.winner === 'A';
     [[m.teamA, aWin],[m.teamB, !aWin]].forEach(([team, won]) => {
@@ -1173,14 +1172,21 @@ function renderMatchCard(m) {
     </div>`;
 }
 
+// Partners tab scope: 'season' (current season) or 'career' (all matches).
+// UI-only — never saved to Firestore.
+let chemistryScope = 'season';
+
 function renderChemistry() {
+  const season = getCurrentSeason();
+  const isCareer = chemistryScope === 'career';
+  const matches = isCareer ? sortedMatches() : matchesForSeason(season.id);
   const pairStats = {};
-  state.matches.forEach(m => {
+  matches.forEach(m => {
     const aWin = m.winner === 'A';
     addPair(pairStats, m.teamA, aWin);
     addPair(pairStats, m.teamB, !aWin);
   });
-  const streaks = computePairStreaks();
+  const streaks = computePairStreaks(matches);
   const arr = Object.values(pairStats).map(p => ({
     ...p,
     longest: streaks[p.names.split(' & ').sort().join('|')]?.longest ?? 0,
@@ -1188,13 +1194,31 @@ function renderChemistry() {
   })).sort((a, b) => (b.wins / b.matches) - (a.wins / a.matches) || b.wins - a.wins);
 
   const list = document.getElementById('chemistry-list');
+  if (!list) return;
+  const seasonLabel = `${season.type === 'ss' ? '☀️' : '❄️'} This season · ${season.id}`;
+  const toggleHtml = `
+    <div class="prof-scope chem-scope">
+      <button class="prof-scope-btn${!isCareer ? ' active' : ''}" data-chem-scope="season">${seasonLabel}</button>
+      <button class="prof-scope-btn${isCareer ? ' active' : ''}" data-chem-scope="career">🏅 Career</button>
+    </div>`;
+  const wireToggle = () => list.querySelectorAll('[data-chem-scope]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      if (chemistryScope === btn.dataset.chemScope) return;
+      chemistryScope = btn.dataset.chemScope;
+      renderChemistry();
+    }));
   if (arr.length === 0) {
-    list.innerHTML = `<div class="hint" style="text-align:center; padding:2rem;">No pairings yet.</div>`;
+    list.innerHTML = `${toggleHtml}<div class="hint" style="text-align:center; padding:2rem;">${isCareer ? 'No pairings yet.' : `No pairings yet in ${escapeHtml(season.name)}.`}</div>`;
+    wireToggle();
     return;
   }
+  const scopeNote = isCareer
+    ? `Career: all ${matches.length} matches. Best streak = longest consecutive wins ever. On fire = current active win streak.`
+    : `${escapeHtml(season.name)}: ${matches.length} match${matches.length === 1 ? '' : 'es'}. Best streak and On fire count this season only.`;
   list.innerHTML = `
+    ${toggleHtml}
     <div class="table-wrap">
-      <table>
+      <table class="chem-table">
         <thead>
           <tr>
             <th>Pairing</th>
@@ -1216,7 +1240,8 @@ function renderChemistry() {
         </tbody>
       </table>
     </div>
-    <p class="hint" style="margin-top:8px">Best streak = longest consecutive wins ever. On fire = current active win streak.</p>`;
+    <p class="hint" style="margin-top:8px">${scopeNote}</p>`;
+  wireToggle();
 }
 
 function addPair(store, team, won) {

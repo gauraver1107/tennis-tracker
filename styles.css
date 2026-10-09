@@ -1343,3 +1343,6 @@ img.pr-avatar {
 }
 .prof-scope-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .prof-scope-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Partners tab: keep numeric columns on one line at phone width */
+.chem-table td.right { white-space: nowrap; }
