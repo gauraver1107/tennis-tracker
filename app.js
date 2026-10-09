@@ -1,6 +1,6 @@
-// ═══ VERSION: v12-wind-tiers · 2026-10-07 ═══
+// ═══ VERSION: v13-indoor-assist · 2026-10-09 ═══
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-console.log('NJ Tennis Tracker — v12-wind-tiers');
+console.log('NJ Tennis Tracker — v13-indoor-assist');
 import {
   getFirestore, doc, setDoc, onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -9,6 +9,13 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js';
 
 import { firebaseConfig } from './firebase-config.js';
+
+// Indoor-court assist is optional: loaded dynamically so a missing or broken
+// indoor-court.js can never stop Firebase init. Until it loads, no card shows.
+let indoorCourt = null;
+import('./indoor-court.js')
+  .then(m => { indoorCourt = m; if (firebaseLoaded) renderWeekendCoordinator(); })
+  .catch(e => console.warn('Indoor court assist unavailable:', e));
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -2637,6 +2644,11 @@ async function renderWeekendCoordinator() {
       const windInfo = windStatus(morningHours);
       const peakWindMph = windInfo ? windInfo.peakMph : kmhToMph(peakWind);
       const peakWindTier = windTier(peakWindMph);
+      let indoorHtml = '';
+      if (indoorCourt && indoorCourt.isRiskyWeather({ verdictRank: verdict.rank, windTier: windInfo?.tier, peakRain })) {
+        try { indoorHtml = indoorCourt.renderIndoorCourtHtml(indoorCourt.indoorCourtPlan(coordinatorDate)); }
+        catch (e) { console.warn('Indoor court card failed:', e); }
+      }
       const windBannerHtml = windInfo && windInfo.tier !== 'green' ? `
         <div class="wc-wind-banner ${windInfo.tier}">
           ${WIND_TIER_COPY[windInfo.tier].emoji} <strong>${WIND_TIER_COPY[windInfo.tier].title}</strong> — up to ${peakWindMph.toFixed(1)} mph around ${windInfo.peakHour.label}${windInfo.tier === 'orange' ? ' · consider indoor' : ''}
@@ -2674,6 +2686,7 @@ async function renderWeekendCoordinator() {
           <div class="wc-verdict ${verdict.rank}">
             ${verdict.rank === 'great' ? '🎾 Great morning to play' : verdict.rank === 'ok' ? '⚠️ ' + verdict.reason : '🚫 ' + verdict.reason}
           </div>
+          ${indoorHtml}
         </div>`;
     }
   }
@@ -2742,6 +2755,7 @@ async function renderWeekendCoordinator() {
   box.querySelectorAll('.vote-btn:not(.not-selected)').forEach(btn => {
     btn.addEventListener('click', () => recordVote(btn.dataset.player, btn.dataset.vote));
   });
+  indoorCourt?.wireIndoorCourt(box);
 }
 
 function recordVote(player, vote) {
