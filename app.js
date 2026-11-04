@@ -31,7 +31,7 @@ const ELO_K = 32;
 // inflated (or deflated) rating on the back of 1-2 sessions.
 // 20 is the CAP: the live threshold adapts to the season (see rampThresholdFor)
 // so early in a season nobody is squashed because nobody can have 20 yet.
-const MIN_MATCHES_FOR_FULL_ELO = 20;
+const MIN_MATCHES_FOR_FULL_ELO = 15;
 
 // ── Season definitions (auto-detected from date) ─────────────────────────
 // SS = Spring/Summer: Mar 1 – Aug 31
