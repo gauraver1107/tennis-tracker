@@ -56,7 +56,7 @@ function matchesForSeason(seasonId) {
   return sortedMatches().filter(m => getCurrentSeason(m.date).id === seasonId);
 }
 
-let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], apiKey: '', eloCarryover: {}, playerAvatars: {},
+let state = { players: [...DEFAULT_PLAYERS], matches: [], availability: {}, photos: [], eloCarryover: {}, playerAvatars: {},
   location: { name: 'Edison, New Jersey', lat: 40.5187, lon: -74.4121 } };
 let trendChart = null, eloChart = null, eloBarChart = null, winRateChart = null, weatherChart = null;
 let currentFilter = 'season:' + getCurrentSeason().id;
@@ -90,7 +90,6 @@ onSnapshot(DOC_REF, (snap) => {
       location: data.location || { name: 'Edison, New Jersey', lat: 40.5187, lon: -74.4121 },
       availability: data.availability || {},
       photos: data.photos || [],
-      apiKey: data.apiKey || '',
       eloCarryover: data.eloCarryover || {},
       playerAvatars: data.playerAvatars || {}
     };
@@ -104,7 +103,7 @@ onSnapshot(DOC_REF, (snap) => {
       setStatus('Synced', 'online');
       return;
     }
-    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [], apiKey: '', playerAvatars: {} };
+    state = { players: [...DEFAULT_PLAYERS], matches: [], location: null, availability: {}, photos: [], playerAvatars: {} };
   }
   if (state.players.length < 5) state.players = [...DEFAULT_PLAYERS];
   state.matches.forEach(m => {
@@ -114,7 +113,7 @@ onSnapshot(DOC_REF, (snap) => {
   });
   firebaseLoaded = true; // first sync complete — saves are now allowed
   setStatus('Synced', 'online');
-  if (!tickerGenerated && state.matches.length > 0 && state.apiKey) {
+  if (!tickerGenerated && state.matches.length > 0) {
     tickerGenerated = true;
     generateTicker();
   }
@@ -1671,24 +1670,25 @@ function openShareModal(m) {
 
 // ── Voice entry + LLM parsing ──────────────────────────────────────────────
 
-const ANTHROPIC_KEY_STORE = 'tennis_anthropic_key';
 let recognition = null;
 let pendingTranscript = '';
-let pendingApiCallback = null;
 let lastParsedResult = null;
 let lastVoteMsg = '';
 
-function getApiKey() {
-  // Firebase first (shared across all devices), localStorage as offline fallback
-  return state.apiKey || localStorage.getItem(ANTHROPIC_KEY_STORE) || '';
+// All Claude calls go through our own server function (api/claude.js).
+// The Anthropic key lives only in a Vercel env var — never in the browser or Firestore.
+async function callClaude(task, prompt) {
+  const res = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task, prompt })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `AI error ${res.status}`);
+  return data.text || '';
 }
-
-async function saveApiKey(key) {
-  const trimmed = key.trim();
-  localStorage.setItem(ANTHROPIC_KEY_STORE, trimmed); // offline fallback
-  state.apiKey = trimmed;
-  await saveState(); // saves to Firebase → syncs to all devices instantly
-}
+// Clean up any key left over from the old client-side setup
+try { localStorage.removeItem('tennis_anthropic_key'); } catch (e) { /* ignore */ }
 
 function setupVoiceEntry() {
   const btn = document.getElementById('voice-btn');
@@ -1860,13 +1860,6 @@ function setupVoiceEntry() {
 
 async function parseWithLLM(transcript) {
   const btn = document.getElementById('voice-btn');
-  const key = getApiKey();
-  if (!key) {
-    pendingApiCallback = () => parseWithLLM(transcript);
-    openApiKeyModal();
-    return;
-  }
-
   btn.classList.add('parsing');
   btn.textContent = '⏳';
   showVoiceTranscript('Parsing: "' + transcript + '"');
@@ -1898,30 +1891,7 @@ Respond ONLY with valid JSON, no explanation:
 }`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 400,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      if (res.status === 401) {
-        localStorage.removeItem(ANTHROPIC_KEY_STORE);
-        state.apiKey = '';
-        saveState();
-        showVoiceError('Invalid API key — please re-enter.');
-      }
-      else showVoiceError('API error: ' + (err.error?.message || res.status));
-      return;
-    }
-
-    const data = await res.json();
-    const raw = data.content[0]?.text || '';
+    const raw = await callClaude('parse', prompt);
     const cleaned = raw.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
     showParsedResult(parsed, transcript);
@@ -2051,30 +2021,6 @@ function showVoiceError(text) {
 function hideEl(id) {
   const el = document.getElementById(id);
   if (el) el.classList.add('hidden');
-}
-
-function openApiKeyModal() {
-  document.getElementById('apikey-input').value = getApiKey();
-  document.getElementById('apikey-modal').classList.remove('hidden');
-}
-
-function setupApiKeyModal() {
-  document.getElementById('apikey-save').addEventListener('click', async () => {
-    const key = document.getElementById('apikey-input').value.trim();
-    if (!key.startsWith('sk-ant-')) { alert('Key should start with sk-ant-'); return; }
-    const btn = document.getElementById('apikey-save');
-    btn.textContent = 'Saving…';
-    btn.disabled = true;
-    await saveApiKey(key);
-    btn.textContent = 'Save & parse';
-    btn.disabled = false;
-    document.getElementById('apikey-modal').classList.add('hidden');
-    if (pendingApiCallback) { pendingApiCallback(); pendingApiCallback = null; }
-  });
-  document.getElementById('apikey-cancel').addEventListener('click', () => {
-    document.getElementById('apikey-modal').classList.add('hidden');
-    pendingApiCallback = null;
-  });
 }
 
 // ── Vote WhatsApp share ────────────────────────────────────────────────────
@@ -3088,9 +3034,6 @@ function buildTickerContext() {
 }
 
 async function generateTicker(force = false) {
-  const key = getApiKey();
-  if (!key) { hideTickerWrap(); return; }
-
   const today = new Date().toISOString().slice(0, 10);
   const allMatches = sortedMatches();
 
@@ -3149,32 +3092,7 @@ Respond ONLY with JSON array of exactly 3 strings, no explanation, no markdown:
 ["english msg 1", "english msg 2", "देवनागरी हरियाणवी msg 3"]`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 200,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      console.warn('Ticker API error:', res.status, errData);
-      const errMsg = errData?.error?.message || `API error ${res.status}`;
-      // Show error in ticker so user can see what's wrong
-      renderTickerMessages([`⚠️ ${errMsg}`]);
-      return;
-    }
-
-    const data = await res.json();
-    const raw = data.content?.[0]?.text || '';
+    const raw = await callClaude('ticker', prompt);
     console.log('Ticker raw response:', raw); // debug
     if (!raw) { hideTickerWrap(); return; }
 
@@ -3253,7 +3171,6 @@ function renderAll() {
 setupTabs();
 setupShareModal();
 setupVoiceEntry();
-setupApiKeyModal();
 window.applyParsedResult = applyParsedResult;
 window.retryVoice = retryVoice;
 window.shareVoteToWhatsApp = shareVoteToWhatsApp;
