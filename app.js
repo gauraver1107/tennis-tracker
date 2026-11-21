@@ -415,16 +415,24 @@ function playerFormAndStreak(matches, player, n = 5) {
 }
 
 // King of the court — crown transfers when the current king is on the losing
-// team; new king = highest-ELO player (at that moment) on the winning team.
+// team, or when a match day is played without the king; new king = highest-ELO
+// player (at that moment) on the winning team.
 function computeKingOfCourt(matches) {
   if (!matches.length) return null;
   const elo = {};
   state.players.forEach(p => { elo[p] = ELO_START; });
   let king = null, since = null;
+  // Who played on each match day — a king who skips a match day gives up the crown.
+  const playedOn = {};
+  matches.forEach(m => {
+    (playedOn[m.date] ||= new Set());
+    [...m.teamA, ...m.teamB].forEach(p => playedOn[m.date].add(p));
+  });
   matches.forEach(m => {
     const winners = m.winner === 'A' ? m.teamA : m.teamB;
     const losers  = m.winner === 'A' ? m.teamB : m.teamA;
-    if (!king || losers.includes(king)) {
+    const kingAbsent = king && !playedOn[m.date].has(king);
+    if (!king || losers.includes(king) || kingAbsent) {
       king = [...winners].sort((a, b) => (elo[b] ?? ELO_START) - (elo[a] ?? ELO_START))[0];
       since = m.date;
     }
