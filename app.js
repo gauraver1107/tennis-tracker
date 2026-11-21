@@ -857,7 +857,11 @@ function renderChampion() {
     box.className = 'champion-hidden';
     return;
   }
-  const s = statsFor(filteredMatches());
+  // Champion of the weekend = best player on the most recent match day in view,
+  // not across the whole season (otherwise someone who skipped recent weekends keeps the title).
+  const inView = filteredMatches();
+  const latestDate = inView[inView.length - 1].date;
+  const s = statsFor(inView.filter(m => m.date === latestDate));
   const rows = state.players.map(p => ({ name: p, ...s[p], winRate: s[p].matches ? s[p].wins / s[p].matches : 0 }))
     .filter(r => r.matches > 0)
     .sort((a, b) => b.winRate - a.winRate || b.wins - a.wins || (b.setsWon - b.setsLost) - (a.setsWon - a.setsLost));
@@ -870,7 +874,7 @@ function renderChampion() {
       <span class="champ-trophy">🏆</span>
     </div>
     <div>
-      <div class="label">Champion of the weekend</div>
+      <div class="label">Champion of the weekend · ${escapeHtml(formatDate(latestDate))}</div>
       <div class="name">${escapeHtml(champ.name)} — ${champ.wins}-${champ.losses}, ${Math.round(champ.winRate * 100)}%</div>
     </div>`;
 }
